@@ -6,7 +6,7 @@ venv/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
 
 # Jupyter & Notebook checkpoints
 .ipynb_checkpoints
@@ -15,13 +15,19 @@ __pycache__/
 # Streamlit secrets (keep private)
 .streamlit/secrets.toml
 
-# Environment variables
+# Environment variables & runtime logs
 .env
+*.log
+
+# Test screenshots & scratch images
+*.png
 
 # Docker data volumes (if local)
 kafka_data/
 mongodb_data/
 
-# OS metadata
+# OS metadata & tooling caches
 .DS_Store
 Thumbs.db
+.gemini/
+

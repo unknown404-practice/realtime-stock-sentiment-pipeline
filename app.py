@@ -55,6 +55,9 @@ if is_dark:
         --status-pill-bg: rgba(16, 185, 129, 0.16);
         --status-pill-color: #34d399;
         --status-pill-border: rgba(16, 185, 129, 0.4);
+        --status-idle-bg: rgba(245, 158, 11, 0.16);
+        --status-idle-color: #fbbf24;
+        --status-idle-border: rgba(245, 158, 11, 0.4);
         --db-badge-bg: rgba(56, 189, 248, 0.12);
         --db-badge-color: #38bdf8;
         --db-badge-border: rgba(56, 189, 248, 0.3);
@@ -105,6 +108,9 @@ else:
         --status-pill-bg: #e6f4ea;
         --status-pill-color: #137333;
         --status-pill-border: #bbf7d0;
+        --status-idle-bg: #fef3c7;
+        --status-idle-color: #b45309;
+        --status-idle-border: #fde68a;
         --db-badge-bg: #f0fdf4;
         --db-badge-color: #166534;
         --db-badge-border: #dcfce7;
@@ -140,8 +146,53 @@ else:
     """
 
 df_dark_css = """
-    [data-testid="stDataFrame"] canvas {
+    [data-testid="stDataFrame"] {
+        background-color: #151d2e !important;
+        border: 1px solid #273549 !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stDataFrameResizable"] {
+        background-color: transparent !important;
+        border: 1px solid #273549 !important;
+    }
+    .stDataFrameGlideDataEditor,
+    .dvn-scroller,
+    .gdg-wmyidgi,
+    .gdg-s1dgczr6 {
+        background-color: transparent !important;
+    }
+    [data-testid="stElementToolbar"],
+    .stElementToolbar {
+        background-color: #1e293b !important;
+        border: 1px solid #273549 !important;
+        border-radius: 6px !important;
+        box-shadow: none !important;
+    }
+    [data-testid="stElementToolbar"] button,
+    .stElementToolbar button {
+        color: #f8fafc !important;
+        background-color: transparent !important;
+    }
+    [data-testid="stElementToolbar"] button:hover,
+    .stElementToolbar button:hover {
+        background-color: #334155 !important;
+    }
+    [data-testid="stElementToolbar"] svg,
+    .stElementToolbar svg {
+        fill: #f8fafc !important;
+        color: #f8fafc !important;
+    }
+    [data-testid="stDataFrame"] canvas,
+    [data-testid="stDataFrame"] [data-stale="true"] canvas,
+    div[data-stale="true"] [data-testid="stDataFrame"] canvas,
+    [data-testid="stElementContainer"][data-stale="true"] [data-testid="stDataFrame"] canvas,
+    div[class*="st-emotion-cache"][data-stale="true"] [data-testid="stDataFrame"] canvas,
+    .stApp--running [data-testid="stDataFrame"] canvas,
+    canvas[data-testid="data-grid-canvas"],
+    .stDataFrameGlideDataEditor canvas {
         filter: invert(0.88) hue-rotate(180deg) !important;
+        -webkit-filter: invert(0.88) hue-rotate(180deg) !important;
+        background-color: transparent !important;
     }
 """ if is_dark else ""
 
@@ -208,19 +259,17 @@ st.markdown(f"""
        Eliminates Streamlit 1.64's data-stale="true" opacity: 0.33 and transition
        ------------------------------------------------------------------------- */
     [data-stale="true"],
-    [data-stale="true"] *,
+    [data-stale="true"] *:not(canvas),
     div[data-stale="true"],
-    div[data-stale="true"] *,
+    div[data-stale="true"] *:not(canvas),
     [data-testid="stElementContainer"][data-stale="true"],
-    [data-testid="stElementContainer"][data-stale="true"] *,
+    [data-testid="stElementContainer"][data-stale="true"] *:not(canvas),
     div[class*="st-emotion-cache"][data-stale="true"],
-    div[class*="st-emotion-cache"][data-stale="true"] *,
+    div[class*="st-emotion-cache"][data-stale="true"] *:not(canvas),
     .element-container[data-stale="true"],
-    .element-container[data-stale="true"] *,
+    .element-container[data-stale="true"] *:not(canvas),
     .stApp--running [data-stale="true"] {{
         opacity: 1 !important;
-        filter: none !important;
-        -webkit-filter: none !important;
         transition: none !important;
         -webkit-transition: none !important;
     }}
@@ -290,6 +339,16 @@ st.markdown(f"""
         white-space: nowrap;
         line-height: 1.2;
     }}
+    .status-live {{
+        background: var(--status-pill-bg) !important;
+        color: var(--status-pill-color) !important;
+        border-color: var(--status-pill-border) !important;
+    }}
+    .status-idle {{
+        background: var(--status-idle-bg) !important;
+        color: var(--status-idle-color) !important;
+        border-color: var(--status-idle-border) !important;
+    }}
     .pulse-dot {{
         width: 8px;
         height: 8px;
@@ -299,6 +358,16 @@ st.markdown(f"""
         border-radius: 50%;
         box-shadow: 0 0 0 rgba(16, 185, 129, 0.4);
         animation: pulse 1.8s infinite;
+    }}
+    .pulse-dot-idle {{
+        width: 8px;
+        height: 8px;
+        min-width: 8px;
+        min-height: 8px;
+        background-color: var(--status-idle-color) !important;
+        border-radius: 50%;
+        box-shadow: none !important;
+        animation: none !important;
     }}
     @keyframes pulse {{
         0% {{ box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }}
@@ -807,8 +876,8 @@ st.markdown(f"""
 def get_mongo_connection():
     """
     Cached connection manager.
-    Prioritizes ultra-fast local Docker MongoDB (<2ms latency, active live stream).
-    Falls back to MongoDB Atlas cloud secrets only if local MongoDB is unreachable.
+    Supports seamless switching between ultra-fast local Docker MongoDB (<2ms)
+    and 24/7 global MongoDB Atlas cloud cluster for Streamlit Community Cloud.
     """
     local_uri = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")
     try:
@@ -819,44 +888,105 @@ def get_mongo_connection():
         pass
 
     # Fallback to secrets (Atlas) or env var
+    atlas_uri = None
     try:
         if "MONGO_URI" in st.secrets:
             atlas_uri = st.secrets["MONGO_URI"]
-            client = MongoClient(atlas_uri, serverSelectionTimeoutMS=1500)
-            client.admin.command('ping')
-            return client, "MongoDB Atlas (Remote Cloud)"
+        elif "mongo" in st.secrets and isinstance(st.secrets["mongo"], dict):
+            atlas_uri = st.secrets["mongo"].get("uri")
     except Exception:
         pass
+    if not atlas_uri:
+        atlas_uri = os.getenv("MONGO_URI")
 
-    fallback_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-    client = MongoClient(fallback_uri, serverSelectionTimeoutMS=500)
-    return client, "Default MongoDB"
+    if atlas_uri:
+        try:
+            client = MongoClient(atlas_uri, serverSelectionTimeoutMS=2000)
+            client.admin.command('ping')
+            return client, "MongoDB Atlas (Global Cloud, Lifetime)"
+        except Exception:
+            pass
+
+    return None, "Demo / Offline Mode"
 
 client, DB_SOURCE_LABEL = get_mongo_connection()
 DB_NAME = os.getenv("DB_NAME", "StockDB")
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "news_sentiment")
+LOGS_COLLECTION_NAME = os.getenv("LOGS_COLLECTION_NAME", "pipeline_logs")
+
+# Automatic one-time seeding if pipeline_logs is fresh
+def auto_seed_pipeline_logs():
+    if client is not None:
+        try:
+            db = client[DB_NAME]
+            if db[LOGS_COLLECTION_NAME].estimated_document_count() == 0 and db[COLLECTION_NAME].estimated_document_count() > 0:
+                from backfill_logs import backfill_pipeline_logs
+                backfill_pipeline_logs(client=client, db_name=DB_NAME)
+        except Exception:
+            pass
+
+auto_seed_pipeline_logs()
 
 # In-memory fast log buffer
 if "pipeline_logs" not in st.session_state:
     st.session_state["pipeline_logs"] = []
+if "total_lifetime_logs" not in st.session_state:
+    st.session_state["total_lifetime_logs"] = 0
 
-def add_local_log(level, component, message):
-    now_str = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
-    entry = {"time": now_str, "level": level, "component": component, "message": message}
+def add_local_log(level, component, message, persist_to_db=True, extra_meta=None):
+    now_utc = datetime.now(timezone.utc)
+    now_str = now_utc.strftime("%H:%M:%S.%f")[:-3]
+    entry = {
+        "time": now_str,
+        "iso_time": now_utc.isoformat(),
+        "level": level,
+        "component": component,
+        "message": message
+    }
+    if extra_meta:
+        entry.update(extra_meta)
+
     st.session_state["pipeline_logs"].insert(0, entry)
-    if len(st.session_state["pipeline_logs"]) > 200:
-        st.session_state["pipeline_logs"] = st.session_state["pipeline_logs"][:200]
+    if len(st.session_state["pipeline_logs"]) > 500:
+        st.session_state["pipeline_logs"] = st.session_state["pipeline_logs"][:500]
+
+    if persist_to_db and client is not None:
+        try:
+            db = client[DB_NAME]
+            db[LOGS_COLLECTION_NAME].insert_one(entry.copy())
+            st.session_state["total_lifetime_logs"] = st.session_state.get("total_lifetime_logs", 0) + 1
+        except Exception:
+            pass
 
 # Add initial boot logs if new session
 if not st.session_state["pipeline_logs"]:
-    add_local_log("INFO", "BOOT", "Superfast Financial Sentiment Dashboard initialized.")
-    add_local_log("SUCCESS", "DATABASE", f"Connected to: {DB_SOURCE_LABEL}")
+    add_local_log("INFO", "BOOT", "Superfast Financial Sentiment Dashboard initialized.", persist_to_db=False)
+    add_local_log("SUCCESS", "DATABASE", f"Connected to: {DB_SOURCE_LABEL}", persist_to_db=False)
 
-def fetch_data_and_logs(limit=100):
+def fetch_lifetime_logs_for_export(max_records=10000):
+    """Fetch complete lifetime logs from MongoDB for comprehensive export."""
+    if client is not None:
+        try:
+            db = client[DB_NAME]
+            cursor = db[LOGS_COLLECTION_NAME].find(
+                {},
+                {"_id": 0, "time": 1, "iso_time": 1, "level": 1, "component": 1, "message": 1}
+            ).sort("_id", DESCENDING).limit(max_records)
+            docs = list(cursor)
+            if docs:
+                return docs
+        except Exception:
+            pass
+    return st.session_state.get("pipeline_logs", [])
+
+def fetch_data_and_logs(limit=100, logs_limit=200):
     """
-    Superfast Data Fetching: Queries MongoDB in < 3ms.
+    Superfast Data & Lifetime Log Fetching: Queries MongoDB in < 5ms.
+    Synchronizes persistent lifetime logs from StockDB.pipeline_logs.
     """
     records = []
+    db_logs = []
+    total_lifetime_count = 0
     if client is not None:
         try:
             db = client[DB_NAME]
@@ -865,24 +995,39 @@ def fetch_data_and_logs(limit=100):
                 {"_id": 0, "ticker": 1, "headline": 1, "sentiment": 1, "confidence": 1, "timestamp": 1}
             ).sort("_id", DESCENDING).limit(limit)
             records = list(cursor)
-        except Exception as e:
-            add_local_log("WARN", "DATABASE", f"Query notice: {e}")
 
-    # Synchronize live streaming events into session log buffer
+            # Query lifetime pipeline logs
+            log_cursor = db[LOGS_COLLECTION_NAME].find(
+                {},
+                {"_id": 0, "time": 1, "iso_time": 1, "level": 1, "component": 1, "message": 1, "ticker": 1, "sentiment": 1}
+            ).sort("_id", DESCENDING).limit(logs_limit)
+            db_logs = list(log_cursor)
+            total_lifetime_count = db[LOGS_COLLECTION_NAME].estimated_document_count()
+        except Exception as e:
+            add_local_log("WARN", "DATABASE", f"Query notice: {e}", persist_to_db=False)
+
+    if db_logs:
+        st.session_state["pipeline_logs"] = db_logs
+        st.session_state["total_lifetime_logs"] = total_lifetime_count or len(db_logs)
+    elif not st.session_state["pipeline_logs"] and records:
+        # Fallback if logs collection is empty: seed from sentiment records
+        for r in reversed(records[:10]):
+            sent = r.get("sentiment", "NEUTRAL")
+            tick = r.get("ticker", "TICKER")
+            head = r.get("headline", "")
+            conf = r.get("confidence", 0.0)
+            add_local_log("FINBERT", "KAFKA_CONSUMER", f"[{sent}] {tick}: \"{head[:50]}...\" (conf: {conf:.4f})", persist_to_db=True)
+        st.session_state["total_lifetime_logs"] = len(records)
+    else:
+        st.session_state["total_lifetime_logs"] = max(total_lifetime_count, len(st.session_state["pipeline_logs"]))
+
+    # Synchronize newly streamed records into lifetime log buffer
     if records:
         last_seen = st.session_state.get("last_seen_headline")
         first_headline = records[0].get("headline")
         if last_seen is None:
-            # Seed terminal with recent stream events on first load
-            for r in reversed(records[:10]):
-                sent = r.get("sentiment", "NEUTRAL")
-                tick = r.get("ticker", "TICKER")
-                head = r.get("headline", "")
-                conf = r.get("confidence", 0.0)
-                add_local_log("FINBERT", "KAFKA_CONSUMER", f"[{sent}] {tick}: \"{head[:50]}...\" (conf: {conf:.4f})")
             st.session_state["last_seen_headline"] = first_headline
         elif last_seen != first_headline:
-            # New incoming records detected! Find all new ones (up to 5)
             new_items = []
             for r in records[:5]:
                 if r.get("headline") == last_seen:
@@ -893,42 +1038,120 @@ def fetch_data_and_logs(limit=100):
                 tick = r.get("ticker", "TICKER")
                 head = r.get("headline", "")
                 conf = r.get("confidence", 0.0)
-                add_local_log("FINBERT", "KAFKA_CONSUMER", f"[{sent}] {tick}: \"{head[:50]}...\" (conf: {conf:.4f})")
+                add_local_log(
+                    "FINBERT",
+                    "KAFKA_CONSUMER",
+                    f"[{sent}] {tick}: \"{head[:50]}...\" (conf: {conf:.4f})",
+                    persist_to_db=False,
+                    extra_meta={"ticker": tick, "sentiment": sent, "confidence": conf, "headline": head}
+                )
             st.session_state["last_seen_headline"] = first_headline
+
+    if not records:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        demo_time = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+        records = [
+            {"ticker": "NVDA", "headline": "NVDA unveils next-generation enterprise AI accelerator chips, boosting forward guidance.", "sentiment": "POSITIVE", "confidence": 0.9538, "timestamp": now_iso},
+            {"ticker": "TSLA", "headline": "TSLA files shelf registration statement with regulators for routine capital refinancing.", "sentiment": "NEUTRAL", "confidence": 0.9398, "timestamp": now_iso},
+            {"ticker": "MSFT", "headline": "MSFT closes major multi-year sovereign cloud infrastructure contract with global partners.", "sentiment": "POSITIVE", "confidence": 0.8845, "timestamp": now_iso},
+            {"ticker": "AMD", "headline": "AMD announces mandatory global recall of 85,000 hardware units due to battery defect.", "sentiment": "NEGATIVE", "confidence": 0.9614, "timestamp": now_iso},
+            {"ticker": "AAPL", "headline": "Analyst upgrades AAPL to Strong Buy with an aggressive price target increase.", "sentiment": "POSITIVE", "confidence": 0.9412, "timestamp": now_iso},
+            {"ticker": "JPM", "headline": "JPM announces record quarterly free cash flow and a new $15 billion share buyback program.", "sentiment": "POSITIVE", "confidence": 0.8959, "timestamp": now_iso},
+            {"ticker": "GOOGL", "headline": "GOOGL trades sideways in quiet trading session ahead of Federal Reserve interest rate decision.", "sentiment": "NEUTRAL", "confidence": 0.8126, "timestamp": now_iso},
+            {"ticker": "AMZN", "headline": "Disappointing quarterly results: AMZN misses EPS forecast as operating expenses rise sharply.", "sentiment": "NEGATIVE", "confidence": 0.9734, "timestamp": now_iso},
+            {"ticker": "META", "headline": "META operating profit jumps 28% year-over-year fueled by high-margin software licensing.", "sentiment": "POSITIVE", "confidence": 0.9440, "timestamp": now_iso},
+            {"ticker": "BAC", "headline": "Credit rating agency downgrades outlook on BAC senior unsecured corporate bonds.", "sentiment": "NEGATIVE", "confidence": 0.9332, "timestamp": now_iso}
+        ]
+        if not st.session_state["pipeline_logs"]:
+            demo_logs = [
+                {"time": demo_time, "iso_time": now_iso, "level": "FINBERT", "component": "KAFKA_CONSUMER", "message": f"[{r['sentiment']}] {r['ticker']}: \"{r['headline'][:50]}...\" (conf: {r['confidence']:.4f})", "ticker": r["ticker"], "sentiment": r["sentiment"]}
+                for r in records
+            ]
+            st.session_state["pipeline_logs"] = demo_logs
+            st.session_state["total_lifetime_logs"] = len(records)
 
     df = pd.DataFrame(records) if records else pd.DataFrame()
     return df, st.session_state["pipeline_logs"]
 
+def check_stream_heartbeat(max_age_seconds=45):
+    """
+    Check if the newest record in StockDB.news_sentiment is < max_age_seconds old.
+    Returns (is_live: bool, age_seconds: float or None).
+    """
+    if client is not None:
+        try:
+            db = client[DB_NAME]
+            latest_doc = db[COLLECTION_NAME].find_one(
+                {},
+                {"_id": 1, "timestamp": 1},
+                sort=[("_id", DESCENDING)]
+            )
+            if latest_doc:
+                now_utc = datetime.now(timezone.utc)
+                age_seconds = None
+                ts = latest_doc.get("timestamp")
+                if ts and isinstance(ts, str):
+                    try:
+                        clean_ts = ts.replace("Z", "+00:00")
+                        rec_time = datetime.fromisoformat(clean_ts)
+                        if rec_time.tzinfo is None:
+                            rec_time = rec_time.replace(tzinfo=timezone.utc)
+                        age_seconds = (now_utc - rec_time).total_seconds()
+                    except Exception:
+                        pass
+                if age_seconds is None and "_id" in latest_doc:
+                    try:
+                        gen_time = getattr(latest_doc["_id"], "generation_time", None)
+                        if gen_time is not None and isinstance(gen_time, datetime):
+                            if gen_time.tzinfo is None:
+                                gen_time = gen_time.replace(tzinfo=timezone.utc)
+                            age_seconds = (now_utc - gen_time).total_seconds()
+                    except Exception:
+                        pass
+
+                if age_seconds is not None:
+                    return (age_seconds < max_age_seconds), max(0.0, age_seconds)
+        except Exception:
+            pass
+    return False, None
+
+
 # Helper for rendering terminal window HTML
-def build_terminal_html(logs_slice, max_h="460px"):
+def build_terminal_html(logs_slice, max_h="460px", total_count=None):
     log_lines_html = []
     for l in logs_slice:
         lvl_class = f"log-{l.get('level', 'INFO')}"
-        log_lines_html.append(f"""
-        <div class="log-line">
-            <span class="log-time">{l.get('time', '')}</span>
-            <span class="log-comp">[{l.get('component', '')}]</span>
-            <span class="{lvl_class}">[{l.get('level', 'INFO')}]</span> {l.get('message', '')}
-        </div>
-        """)
+        time_str = l.get('time', '')
+        comp_str = l.get('component', '')
+        lvl_str = l.get('level', 'INFO')
+        msg_str = l.get('message', '')
+        log_lines_html.append(
+            f'<div class="log-line">'
+            f'<span class="log-time">{time_str}</span> '
+            f'<span class="log-comp">[{comp_str}]</span> '
+            f'<span class="{lvl_class}">[{lvl_str}]</span> {msg_str}'
+            f'</div>'
+        )
     body_content = "".join(log_lines_html) if log_lines_html else '<div style="color: var(--text-dim);">No log events...</div>'
     term_title = "DARK TERMINAL CONSOLE" if is_dark else "LIGHT TERMINAL CONSOLE"
-    return f"""
-    <div class="terminal-window">
-        <div class="terminal-header">
-            <div class="terminal-dots">
-                <div class="dot dot-red"></div>
-                <div class="dot dot-yellow"></div>
-                <div class="dot dot-green"></div>
-            </div>
-            <span>{term_title} &bull; {len(st.session_state['pipeline_logs'])} TOTAL EVENTS</span>
-            <span style="color: var(--status-pill-color); font-weight: 700;">● STREAMING</span>
-        </div>
-        <div class="terminal-body" style="max-height: {max_h};">
-            {body_content}
-        </div>
-    </div>
-    """
+    raw_count = total_count if total_count is not None else st.session_state.get("total_lifetime_logs", len(st.session_state.get('pipeline_logs', [])))
+    formatted_count = f"{raw_count:,}" if isinstance(raw_count, (int, float)) else str(raw_count)
+    return (
+        f'<div class="terminal-window">'
+        f'<div class="terminal-header">'
+        f'<div class="terminal-dots">'
+        f'<div class="dot dot-red"></div>'
+        f'<div class="dot dot-yellow"></div>'
+        f'<div class="dot dot-green"></div>'
+        f'</div>'
+        f'<span>{term_title} &bull; {formatted_count} LIFETIME EVENTS</span>'
+        f'<span style="color: var(--status-pill-color); font-weight: 700;">● STREAMING</span>'
+        f'</div>'
+        f'<div class="terminal-body" style="max-height: {max_h};">'
+        f'{body_content}'
+        f'</div>'
+        f'</div>'
+    )
 
 def render_cards(df_to_show, max_cards=25):
     cards_html = []
@@ -979,9 +1202,9 @@ with st.sidebar:
     st.subheader("Quick Actions")
     col_c, col_r = st.columns(2)
     with col_c:
-        if st.button("🗑️ Clear Logs", width="stretch"):
+        if st.button("🗑️ Reset View", width="stretch", help="Clears local display buffer; MongoDB lifetime logs remain safely preserved."):
             st.session_state["pipeline_logs"] = []
-            add_local_log("INFO", "TERMINAL", "Log buffer cleared.")
+            add_local_log("INFO", "TERMINAL", "Display buffer reset.", persist_to_db=False)
             st.rerun()
     with col_r:
         if st.button("⚡ Fast Sync", width="stretch"):
@@ -1007,12 +1230,25 @@ with header_col2:
     with st.container(border=True):
         col_status, col_theme = st.columns([1.1, 0.9], vertical_alignment="center")
         with col_status:
-            st.markdown(f"""
-                <div class="status-pill">
-                    <div class="pulse-dot"></div>
-                    <span>STREAM: LIVE FAST</span>
-                </div>
-            """, unsafe_allow_html=True)
+            @st.fragment(run_every=f"{refresh_interval}s" if auto_refresh else None)
+            def render_header_heartbeat():
+                is_live, age_sec = check_stream_heartbeat(max_age_seconds=45)
+                pill_cls = "status-pill status-live" if is_live else "status-pill status-idle"
+                dot_cls = "pulse-dot" if is_live else "pulse-dot-idle"
+                if is_live:
+                    badge_text = "STREAM: LIVE FAST"
+                elif age_sec is not None:
+                    badge_text = f"STREAM: IDLE ({int(age_sec)}s ago)"
+                else:
+                    badge_text = "STREAM: IDLE / PAUSED"
+                st.markdown(f"""
+                    <div class="{pill_cls}">
+                        <div class="{dot_cls}"></div>
+                        <span>{badge_text}</span>
+                    </div>
+                """, unsafe_allow_html=True)
+
+            render_header_heartbeat()
         with col_theme:
             st.toggle(
                 "🌙 Dark Mode",
@@ -1048,13 +1284,16 @@ with tab_feed:
         """
         df, logs = fetch_data_and_logs(limit=100)
 
+        if "Demo" in DB_SOURCE_LABEL:
+            st.info("🌟 **Demo Intelligence Preview**: Showing realistic financial sentiment simulation. To connect 24/7 cloud streaming for global users, configure `MONGO_URI` in Streamlit Cloud Secrets.")
+
         if df.empty:
             st.info(
                 "ℹ️ **No sentiment records found in database yet.**\n\n"
                 "To stream real-time data:\n"
-                "1. Run `Producer.ipynb` in JupyterLab (streams market news to Kafka).\n"
-                "2. Run `Consumer.ipynb` in JupyterLab (runs FinBERT & saves to MongoDB).\n"
-                "3. Ensure MongoDB is running locally (`docker compose up -d`)."
+                "1. Run `run_pipeline.py` or double-click `start_pipeline.bat`.\n"
+                "2. Or run `Producer.ipynb` and `Consumer.ipynb` in JupyterLab.\n"
+                "3. Ensure MongoDB is running (`docker compose up -d` or MongoDB Atlas)."
             )
             return
 
@@ -1151,7 +1390,8 @@ with tab_feed:
                     "sentiment": st.column_config.TextColumn("Sentiment", width="medium"),
                     "confidence": st.column_config.NumberColumn("Confidence", format="%.4f", width="small"),
                     "timestamp": st.column_config.TextColumn("Timestamp (UTC)", width="medium")
-                }
+                },
+                key="live_news_data_table"
             )
             st.markdown("---")
             st.subheader("🖥️ Live Execution Terminal Console")
@@ -1179,52 +1419,67 @@ with tab_feed:
 # TAB 2: Execution Logs
 # ------------------------------------------------------------------------------
 with tab_logs:
-    st.subheader("🖥️ Pipeline Execution Logs")
-    st.markdown("Unified real-time events from **Producer**, **Kafka**, **FinBERT Consumer**, and **MongoDB**.")
+    st.subheader("🖥️ Pipeline Execution Logs (Lifetime Store)")
+    st.markdown("Unified real-time events permanently recorded across **Producer**, **Kafka**, **FinBERT Consumer**, and **MongoDB**.")
 
-    all_logs = st.session_state.get("pipeline_logs", [])
+    # High-frequency fragment for Tab 2 so it updates live in real-time
+    @st.fragment(run_every=f"{refresh_interval}s" if auto_refresh else None)
+    def render_tab_logs():
+        df_dummy, current_logs = fetch_data_and_logs(limit=10, logs_limit=300)
+        total_lifetime = st.session_state.get("total_lifetime_logs", len(current_logs))
 
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 2, 2])
-    with ctrl_col1:
-        lvl_filter = st.selectbox("Filter Level:", ["ALL", "FINBERT", "INGEST", "PRODUCER", "CONSUMER", "DATABASE", "ATLAS_SYNC", "SUCCESS", "WARN", "ERROR"], key="log_lvl_filter")
-    with ctrl_col2:
-        comp_filter = st.selectbox("Filter Component:", ["ALL", "KAFKA_PRODUCER", "KAFKA_CONSUMER", "FINBERT", "YAHOO_RSS", "DATABASE", "SYSTEM", "BOOT"], key="log_comp_filter")
-    with ctrl_col3:
-        search_log = st.text_input("🔍 Search Log Text:", "", key="log_search_input")
+        metric_col1, metric_col2, metric_col3 = st.columns([1.5, 1.5, 3])
+        with metric_col1:
+            st.metric("Lifetime Events", f"{total_lifetime:,}")
+        with metric_col2:
+            st.metric("Active Buffer", f"{len(current_logs):,}")
+        with metric_col3:
+            st.caption(f"🛡️ Storage: **Lifetime Durable** in `StockDB.{LOGS_COLLECTION_NAME}` (Zero TTL expiration).")
 
-    filtered_logs = all_logs.copy()
-    if lvl_filter != "ALL":
-        filtered_logs = [l for l in filtered_logs if l.get("level") == lvl_filter]
-    if comp_filter != "ALL":
-        filtered_logs = [l for l in filtered_logs if l.get("component") == comp_filter]
-    if search_log:
-        s_low = search_log.lower()
-        filtered_logs = [l for l in filtered_logs if s_low in l.get("message", "").lower() or s_low in l.get("component", "").lower()]
+        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 2, 2])
+        with ctrl_col1:
+            lvl_filter = st.selectbox("Filter Level:", ["ALL", "FINBERT", "INGEST", "PRODUCER", "CONSUMER", "DATABASE", "ATLAS_SYNC", "SUCCESS", "WARN", "ERROR"], key="tab2_lvl_filter")
+        with ctrl_col2:
+            comp_filter = st.selectbox("Filter Component:", ["ALL", "KAFKA_PRODUCER", "KAFKA_CONSUMER", "FINBERT", "YAHOO_RSS", "DATABASE", "SYSTEM", "BOOT"], key="tab2_comp_filter")
+        with ctrl_col3:
+            search_log = st.text_input("🔍 Search Log Text:", "", key="tab2_search_input")
 
-    st.markdown(build_terminal_html(filtered_logs[:60], max_h="480px"), unsafe_allow_html=True)
+        filtered_logs = current_logs.copy()
+        if lvl_filter != "ALL":
+            filtered_logs = [l for l in filtered_logs if l.get("level") == lvl_filter]
+        if comp_filter != "ALL":
+            filtered_logs = [l for l in filtered_logs if l.get("component") == comp_filter]
+        if search_log:
+            s_low = search_log.lower()
+            filtered_logs = [l for l in filtered_logs if s_low in l.get("message", "").lower() or s_low in l.get("component", "").lower()]
 
-    # Export Buttons with static file names to avoid widget destruction on ticks
-    btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        log_text = "\n".join([f"{l.get('time')} [{l.get('component')}] [{l.get('level')}]: {l.get('message')}" for l in filtered_logs])
-        st.download_button(
-            label="📥 Download Log File (.txt)",
-            data=log_text,
-            file_name="pipeline_logs.txt",
-            mime="text/plain",
-            width="stretch",
-            key="btn_dl_txt"
-        )
-    with btn_col2:
-        log_json = json.dumps(filtered_logs, indent=2)
-        st.download_button(
-            label="📥 Export Log Data (.json)",
-            data=log_json,
-            file_name="pipeline_logs.json",
-            mime="application/json",
-            width="stretch",
-            key="btn_dl_json"
-        )
+        st.markdown(build_terminal_html(filtered_logs[:80], max_h="480px", total_count=total_lifetime), unsafe_allow_html=True)
+
+        # Export Buttons with lifetime data option
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            lifetime_export = fetch_lifetime_logs_for_export(max_records=10000)
+            log_text = "\n".join([f"{l.get('time')} [{l.get('component')}] [{l.get('level')}]: {l.get('message')}" for l in lifetime_export])
+            st.download_button(
+                label=f"📥 Download Lifetime Logs (.txt) — {len(lifetime_export):,} events",
+                data=log_text,
+                file_name="pipeline_logs_lifetime.txt",
+                mime="text/plain",
+                width="stretch",
+                key="btn_dl_txt"
+            )
+        with btn_col2:
+            lifetime_json_str = json.dumps(lifetime_export, indent=2)
+            st.download_button(
+                label=f"📥 Export Lifetime Logs (.json) — {len(lifetime_export):,} events",
+                data=lifetime_json_str,
+                file_name="pipeline_logs_lifetime.json",
+                mime="application/json",
+                width="stretch",
+                key="btn_dl_json"
+            )
+
+    render_tab_logs()
 
 # ------------------------------------------------------------------------------
 # TAB 3: Architecture & Status (Static & Zero Rerun Overhead)

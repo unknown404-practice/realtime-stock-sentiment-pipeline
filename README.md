@@ -1,218 +1,326 @@
-# 📈 Real-Time Stock-News Sentiment Pipeline
+# 📈 Real-Time Stock News Sentiment Pipeline
 
-A production-grade, end-to-end data engineering and AI pipeline that streams real-time financial market news through **Apache Kafka (KRaft mode)** or **autonomous 24/7 cloud ingestion**, classifies sentiment using a **local FinBERT model** (`ProsusAI/finbert`), persists enriched records and distributed execution logs in **MongoDB (Local or Atlas Cloud)**, and visualizes market sentiment live in an interactive, **media-responsive Streamlit dashboard** with a built-in **real-time terminal log console**.
+> **End-to-end AI data engineering pipeline** · Apache Kafka · FinBERT · MongoDB Atlas · Streamlit · 24/7 Global Cloud
 
-> **100% Free & Open-Source**: Runs locally with Docker & PyTorch, and supports 24/7 autonomous uptime on Streamlit Community Cloud with MongoDB Atlas without paid APIs or external services.
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![MongoDB Atlas](https://img.shields.io/badge/MongoDB-Atlas-green?logo=mongodb)](https://www.mongodb.com/atlas)
+[![Apache Kafka](https://img.shields.io/badge/Apache-Kafka-231F20?logo=apachekafka)](https://kafka.apache.org/)
 
 ---
 
-## 🏛 Architecture Overview
+## 🧠 What This Is
+
+A **production-grade, end-to-end data engineering and NLP pipeline** that:
+
+- 🔴 **Streams** real-time financial market headlines via **Apache Kafka (KRaft mode)**
+- 🤖 **Classifies** sentiment using a **local FinBERT model** (`ProsusAI/finbert`) with zero paid APIs
+- 🗄️ **Persists** enriched records + distributed execution logs in **MongoDB (Local Docker or Atlas Cloud)**
+- 📊 **Visualizes** live market sentiment in an interactive **Streamlit dashboard** with a real-time terminal log console
+- ☁️ **Runs 24/7 autonomously** on Streamlit Community Cloud + MongoDB Atlas — even when your laptop is off
+
+> **100% Free & Open-Source** — no paid APIs, no Ollama, no cloud billing. Runs locally with Docker + PyTorch and deploys globally free via Streamlit Community Cloud.
+
+---
+
+## 🏛️ Architecture Overview
 
 ```
-[Producer.ipynb]  (JupyterLab / Local)
-       │  Streams real Yahoo Finance RSS news to Kafka topic 'stock-news'
-       ▼  Logs to MongoDB Atlas (StockDB.pipeline_logs)
-[Apache Kafka]   (Docker, KRaft mode, localhost:9092)
-       │  Streams raw events
-       ▼  Consumes streaming news
-[Consumer.ipynb]  (JupyterLab / Local)
-       │  Local FinBERT model (ProsusAI/finbert via PyTorch/Transformers)
-       │  Enriches with sentiment (POSITIVE/NEGATIVE/NEUTRAL) & confidence
-       ▼  Inserts enriched records & logs to MongoDB
-[MongoDB (Atlas/Local)] (StockDB.news_sentiment & StockDB.pipeline_logs)
-       ▲                               ▲
-       │ Persists records & logs       │ Real-time log sync
-       │                               │
-[Autonomous 24/7 Cloud Engine] ────────┘
-       │  Direct Yahoo RSS & FinBERT in-app execution (when laptop is off)
-       ▼
-[Streamlit Dashboard (app.py)] (Desktop / Tablet / Mobile)
-       ├── Top Real-Time Activity Ticker (Pulsing live feed)
-       ├── Split View: News Cards + Live Terminal Console
-       ├── Full Pipeline Execution Log Center (Filtering, Search, TXT/JSON export)
-       └── Real-time KPI Metric Cards & Sentiment Analytics
+┌──────────────────────────────────────────────────────────────┐
+│                     STREAMING LAYER                          │
+│                                                              │
+│  [producer.py / Producer.ipynb]                              │
+│   ↓ Streams 10-ticker financial headlines @ 0.8s intervals   │
+│   ↓                                                          │
+│  [Apache Kafka - KRaft Mode]  localhost:9092                 │
+│   Topic: stock-news                                          │
+│   ↓                                                          │
+│  [consumer.py / Consumer.ipynb]                              │
+│   ↓ Local FinBERT (ProsusAI/finbert, PyTorch CPU/GPU)       │
+│   ↓ Enriches: POSITIVE / NEGATIVE / NEUTRAL + confidence    │
+└──────────────────────────┬───────────────────────────────────┘
+                           ↓
+┌──────────────────────────────────────────────────────────────┐
+│                     STORAGE LAYER                            │
+│                                                              │
+│  [MongoDB] (Local Docker localhost:27017 OR Atlas Cloud)     │
+│   ├── StockDB.news_sentiment   ← enriched FinBERT records   │
+│   └── StockDB.pipeline_logs   ← lifetime execution audit    │
+└──────────────────────────┬───────────────────────────────────┘
+                           ↓
+┌──────────────────────────────────────────────────────────────┐
+│                   VISUALIZATION LAYER                        │
+│                                                              │
+│  [app.py — Streamlit Dashboard]                              │
+│   ├── 🟢 Real-Time Activity Ribbon (pulsing live status)     │
+│   ├── ⚡ Split View: News Cards + Live Terminal Console      │
+│   ├── 📋 Lifetime Pipeline Log Center (filter/search/export) │
+│   └── 🌐 24/7 Autonomous Cloud Engine (auto-RSS + FinBERT)  │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---|---|
+| ⚡ **Real-Time Streaming** | Kafka KRaft mode — no ZooKeeper, sub-second message delivery |
+| 🤖 **Local FinBERT AI** | `ProsusAI/finbert` — finance-domain BERT, runs 100% offline after first download |
+| 📊 **Live Dashboard** | Streamlit app with 3 view modes: Split, Mobile Cards, Data Table |
+| 🟢 **Live Heartbeat** | Dynamic `STREAM: LIVE FAST` / `STREAM: IDLE` badge with real-time age |
+| 🖥️ **Terminal Console** | Built-in execution log terminal with level filtering + keyword search |
+| 📤 **Log Export** | Download pipeline logs as `.txt` or `.json` |
+| ☁️ **24/7 Cloud Mode** | Streamlit Cloud + MongoDB Atlas for global 24/7 uptime, free tier |
+| 🔒 **Zero Credential Leaks** | `secrets.toml` gitignored; secrets injected via Streamlit Cloud UI |
+| 🧩 **Demo Mode** | Fallback realistic seed data when DB is empty — no blank screens |
 
 ---
 
 ## 📁 Project Structure
 
 ```
-stock-sentiment-pipeline/
+realtime-stock-sentiment-pipeline/
 │
-├── .venv/                 # Dedicated Python virtual environment (Python 3.10+)
 ├── .streamlit/
-│   └── secrets.toml       # MongoDB Atlas connection URI (configured & gitignored)
-├── docker-compose.yml     # Docker services: Kafka in KRaft mode & MongoDB
-├── requirements.txt       # Python dependencies (kafka-python, transformers, torch, etc.)
-├── Producer.ipynb         # Jupyter notebook streaming Yahoo market news to Kafka & Atlas
-├── Consumer.ipynb         # Jupyter notebook classifying headlines with FinBERT & saving to MongoDB
-├── app.py                 # Streamlit real-time dashboard with Live Terminal & 24/7 Cloud engine
-└── README.md              # Full documentation, architecture & run instructions
+│   ├── config.toml              # UI theme, server & anti-dimming config
+│   ├── secrets.toml             # 🔒 GITIGNORED — private MongoDB Atlas URI
+│   └── secrets.toml.example     # Template for contributors
+│
+├── docker-compose.yml           # Kafka (KRaft) + MongoDB local containers
+├── requirements.txt             # Lean: streamlit, pandas, pymongo, dnspython
+├── requirements-pipeline.txt    # Full: + kafka-python, torch, transformers
+│
+├── app.py                       # Streamlit real-time dashboard (1500+ lines)
+├── producer.py                  # CLI producer → streams headlines to Kafka
+├── consumer.py                  # CLI FinBERT consumer → enriches & stores
+├── run_pipeline.py              # Unified process supervisor (producer + consumer)
+├── start_pipeline.bat           # 1-click Windows launcher
+├── start_pipeline.ps1           # PowerShell launcher
+│
+├── Producer.ipynb               # Interactive Jupyter producer notebook
+├── Consumer.ipynb               # Interactive Jupyter FinBERT notebook
+├── sync_to_atlas.py             # Local → Atlas migration utility
+├── backfill_logs.py             # One-time audit log backfill utility
+├── test_dashboard.py            # Unit test suite (14 test cases, all passing)
+└── README.md                    # This file
 ```
 
 ---
 
 ## 📋 Prerequisites
 
-Before running the project, ensure you have:
-1. **Python 3.10+**: (Python 3.10 is recommended for optimal PyTorch and Kafka driver compatibility).
-2. **Docker Desktop**: With Docker Engine and Docker Compose v2 enabled and running.
-3. **JupyterLab Desktop** (or standard JupyterLab in your browser).
-4. **Internet connection**: Needed only on first run to download Docker images and FinBERT model weights (~438MB). Subsequent runs run entirely offline.
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | 3.10+ | 3.10 recommended for PyTorch + Kafka compatibility |
+| Docker Desktop | Latest | Engine + Compose v2 enabled and running |
+| JupyterLab | Optional | Only needed for notebook mode |
+| Internet | First run only | Downloads Docker images + FinBERT weights (~438MB) |
 
 ---
 
-## 🚀 Step-by-Step Setup & Execution Guide
+## 🚀 Quick Start (Local)
 
-Follow these instructions in exact sequential order:
-
-### 1. Create and Activate the Virtual Environment
-
-Open PowerShell (Windows) or Terminal (macOS/Linux) in the project root:
+### Step 1 — Clone & Create Virtual Environment
 
 ```bash
-# Windows (using Python 3.10 or py launcher):
+git clone https://github.com/unknown404-practice/realtime-stock-sentiment-pipeline.git
+cd realtime-stock-sentiment-pipeline
+
+# Windows
 py -3.10 -m venv .venv
 .\.venv\Scripts\activate
 
-# macOS / Linux:
+# macOS / Linux
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
----
-
-### 2. Install Python Dependencies & Register Jupyter Kernel
-
-With the virtual environment activated:
+### Step 2 — Install Dependencies
 
 ```bash
 pip install --upgrade pip
+
+# For Streamlit dashboard only (cloud hosting):
 pip install -r requirements.txt
 
-# Register the environment as a selectable Jupyter kernel
-python -m ipykernel install --user --name stock-sentiment-pipeline --display-name "Python (Stock Sentiment)"
+# For full local pipeline (Kafka + FinBERT):
+pip install -r requirements-pipeline.txt
 ```
 
----
-
-### 3. Start Docker Infrastructure (Kafka + MongoDB)
-
-Start the local KRaft Apache Kafka broker and MongoDB database:
+### Step 3 — Start Docker Infrastructure
 
 ```bash
-# Start Kafka and MongoDB in background
+# Start Kafka (KRaft) + MongoDB
 docker compose up -d
 
-# Verify both containers are running (stock-kafka and stock-mongodb)
+# Verify containers are running
 docker compose ps
-
-# Follow container logs (optional)
-docker compose logs -f
-
-# When you want to stop containers later:
-# docker compose down
 ```
 
-> **Kafka Broker**: `localhost:9092` (Auto-creates topic `stock-news` on demand)  
-> **MongoDB**: `localhost:27017` (Database: `StockDB`, Collection: `news_sentiment`)
+> **Kafka Broker**: `localhost:9092` (auto-creates topic `stock-news`)  
+> **MongoDB**: `localhost:27017` (database: `StockDB`)
 
----
+### Step 4 — Start Streaming Workers
 
-### 4. Run the Producer (`Producer.ipynb`)
+**Option A — CLI Supervisor (Recommended)**
+```bash
+# Windows
+.\.venv\Scripts\python.exe run_pipeline.py --interval 0.8
 
-1. Launch **JupyterLab Desktop** and open the project directory `stock-sentiment-pipeline`.
-2. Open [`Producer.ipynb`](file:///C:/Users/RANADEEP/Documents/stock-sentiment-pipeline/Producer.ipynb).
-3. Ensure the kernel in the top-right corner is set to **`Python (Stock Sentiment)`**.
-4. Run all cells (`Shift + Enter`).
-5. The producer will create the Kafka topic `stock-news` (if not already present) and begin emitting realistic stock headlines every 2 seconds:
-   ```text
-   [0001] Sent -> NVDA: "NVDA unveils next-generation enterprise AI accelerator chips..." | 2026-09-16T...
-   [0002] Sent -> TSLA: "TSLA faces new antitrust investigation from regulators..." | 2026-09-16T...
-   ```
-6. **To Stop**: Click the **Square Stop Button (Interrupt kernel)** on the toolbar.
+# macOS / Linux
+python3 run_pipeline.py --interval 0.8
 
----
+# Or use 1-click Windows launcher:
+.\start_pipeline.bat
+```
+Press `Ctrl+C` to cleanly shut down both producer and consumer.
 
-### 5. Run the Consumer (`Consumer.ipynb`)
+**Option B — Interactive Jupyter Notebooks**
+1. Run all cells in `Producer.ipynb` → streams headlines to Kafka
+2. Run all cells in `Consumer.ipynb` → runs FinBERT, stores to MongoDB
 
-1. In JupyterLab, open [`Consumer.ipynb`](file:///C:/Users/RANADEEP/Documents/stock-sentiment-pipeline/Consumer.ipynb).
-2. Set the kernel to **`Python (Stock Sentiment)`**.
-3. Run all cells (`Shift + Enter`).
-4. On the first run, the local **ProsusAI/finbert** model weights will be downloaded to your local cache.
-5. The consumer will connect to Kafka at `localhost:9092`, run FinBERT text classification on each headline, store the enriched document in MongoDB, and print live logs:
-   ```text
-   [POSITIVE] NVDA: NVDA unveils next-generation enterprise AI accelerator chips... (confidence: 0.9421)
-   [NEGATIVE] TSLA: TSLA faces new antitrust investigation from regulators... (confidence: 0.8874)
-   ```
-6. **To Stop**: Click the **Square Stop Button (Interrupt kernel)** on the toolbar.
-
----
-
-### 6. Launch the Streamlit Live Dashboard (`app.py`)
-
-Open a terminal window in the project folder with `.venv` activated:
+### Step 5 — Launch the Dashboard
 
 ```bash
 streamlit run app.py
 ```
 
-- Streamlit will open automatically in your browser at `http://localhost:8501`.
-- **Key Dashboard Features**:
-  - 🟢 **Top Real-Time Activity Ribbon**: Displays latest live stream event (ingest, inference, database sync) with pulsing status.
-  - ⚡ **Multi-View Modes**:
-    - `⚡ Split View (Feed + Live Terminal)`: Side-by-side news feed and real-time live terminal console.
-    - `📱 Mobile Card Feed`: Clean responsive cards with live console.
-    - `💻 Data Table`: Color-coded analytical table with live console.
-  - 🖥️ **Full Pipeline Execution Logs Tab**:
-    - Live counters: Total Events, Ingest & Kafka Events, FinBERT Inferences, Database Syncs.
-    - Filter by level (`ALL`, `FINBERT`, `INGEST`, `PRODUCER`, `CONSUMER`, `DATABASE`, `ATLAS_SYNC`, `WARN`, `ERROR`).
-    - Filter by component & instant keyword search.
-    - Export logs as `.txt` or `.json`.
-  - 🌐 **24/7 Autonomous Cloud Engine**: Automatically fetches Yahoo Finance RSS news and executes FinBERT classifications even if local notebooks are stopped.
+Open → **http://localhost:8501**
 
 ---
 
-### 7. Deploy 24/7 Free to Streamlit Community Cloud
+## ☁️ Deploy Free to Streamlit Community Cloud (24/7 Global)
 
-Anyone in the world can access your dashboard anytime, even when your laptop is turned off:
+Anyone in the world can access your dashboard anytime, even when your laptop is off:
 
-1. **Push your code to GitHub**:
-   ```bash
-   git branch -M main
-   git remote add origin https://github.com/<YOUR_USERNAME>/stock-sentiment-pipeline.git
-   git push -u origin main
+1. **Push to GitHub** (already done if you're reading this!)
+
+2. **Go to [share.streamlit.io](https://share.streamlit.io)** → Sign in with GitHub
+
+3. **New App** → Select:
+   - Repository: `unknown404-practice/realtime-stock-sentiment-pipeline`
+   - Branch: `main`
+   - Main file: `app.py`
+
+4. **Advanced Settings → Secrets** — add your MongoDB Atlas URI:
+   ```toml
+   MONGO_URI = "mongodb+srv://<username>:<password>@cluster0.xxxxxx.mongodb.net/?appName=Cluster0"
+   DB_NAME = "StockDB"
+   COLLECTION_NAME = "news_sentiment"
+   LOGS_COLLECTION_NAME = "pipeline_logs"
    ```
-2. **Deploy on Streamlit Community Cloud**:
-   - Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
-   - Click **"New app"** -> Select your repository `stock-sentiment-pipeline` -> Branch `main` -> Main file `app.py`.
-   - Click **"Advanced settings..."** -> Under **Secrets**, add your MongoDB Atlas URI:
-     ```toml
-     MONGO_URI = "mongodb+srv://ranadeep2021saha_db_user:StockPass2026@cluster0.tq1iqxk.mongodb.net/?appName=Cluster0"
-     DB_NAME = "StockDB"
-     COLLECTION_NAME = "news_sentiment"
-     ```
-   - Click **"Deploy"**!
-3. Your public live URL (e.g. `https://stock-sentiment-pipeline.streamlit.app`) is now 24/7 active with live real-time financial news, FinBERT AI inference, and execution logs visible to everyone.
+
+5. Click **Deploy** 🚀
+
+Your public live URL (e.g. `https://realtime-stock-sentiment-pipeline.streamlit.app`) will be live 24/7 with real-time AI sentiment analysis.
+
+### MongoDB Atlas Setup (Free Tier)
+1. Create a free cluster at [mongodb.com/atlas](https://www.mongodb.com/atlas)
+2. Create database user with read/write access
+3. Whitelist `0.0.0.0/0` in Network Access (for Streamlit Cloud)
+4. Copy the connection string into your Streamlit secrets
 
 ---
 
-## 🛠 Troubleshooting
+## 🔧 Configuration Reference
 
-| Issue | Cause | Solution |
+### `.streamlit/secrets.toml` (local — gitignored)
+
+Copy `secrets.toml.example` and fill in your values:
+
+```toml
+MONGO_URI = "mongodb+srv://<username>:<password>@cluster0.xxxxxx.mongodb.net/?appName=Cluster0"
+DB_NAME = "StockDB"
+COLLECTION_NAME = "news_sentiment"
+LOGS_COLLECTION_NAME = "pipeline_logs"
+```
+
+### Pipeline Interval
+
+Control the streaming speed via `--interval` flag (seconds between headlines):
+
+```bash
+python run_pipeline.py --interval 0.8   # fast (default)
+python run_pipeline.py --interval 2.0   # slower / conservative
+```
+
+---
+
+## 🧪 Running Tests
+
+```bash
+python -m pytest test_dashboard.py -v
+```
+
+All **14 unit tests** cover:
+- MongoDB connection handling (cloud, local, offline)
+- FinBERT sentiment classification
+- Heartbeat detection logic
+- Demo/offline fallback mode
+- Log parsing and export
+
+---
+
+## 🛠️ Troubleshooting
+
+| Issue | Cause | Fix |
 |---|---|---|
-| `docker compose` fails: `failed to connect to the docker API` | Docker Desktop is closed or starting up | Open the Docker Desktop app, verify the engine icon shows green (running), and re-run `docker compose up -d`. |
-| Port conflict on `9092` or `27017` | Another Kafka or MongoDB instance is using the port | Run `netstat -ano \| findstr :9092` or change port mappings in `docker-compose.yml`. |
-| `NoBrokersAvailable` error in Notebooks | Kafka container is still booting | Wait 10-15 seconds for KRaft quorum initialization, then re-run the notebook cell. |
-| FinBERT download slow or interrupted | Hugging Face network latency on first run | Run `python -c "from transformers import pipeline; pipeline('text-classification', model='ProsusAI/finbert')"` in terminal to pre-cache the model. |
-| Notebook cannot import `kafka` or `transformers` | Wrong Jupyter kernel selected | Change kernel in top-right corner to `Python (Stock Sentiment)`. |
-| MongoDB shows 0 records in Streamlit | Producer or Consumer not yet running | The autonomous cloud engine will automatically start ingesting Yahoo news within 3 seconds. |
+| `docker compose` fails: `failed to connect to Docker API` | Docker Desktop not running | Open Docker Desktop, wait for green engine icon, retry |
+| Port conflict on `9092` or `27017` | Another Kafka/MongoDB instance | `netstat -ano \| findstr :9092` — change ports in `docker-compose.yml` |
+| `NoBrokersAvailable` error | Kafka still initializing | Wait 10–15s for KRaft quorum, retry |
+| FinBERT download slow/fails | Hugging Face network | Pre-cache: `python -c "from transformers import pipeline; pipeline('text-classification', model='ProsusAI/finbert')"` |
+| Wrong Jupyter kernel | `.venv` not registered | Run: `python -m ipykernel install --user --name stock-sentiment --display-name "Python (Stock Sentiment)"` |
+| Dashboard shows 0 records | Workers not running | Start `run_pipeline.py` — demo seed data shows automatically in offline mode |
+| `STREAM: IDLE` badge | No new records in 45s | Pipeline workers stopped — restart `run_pipeline.py` |
 
 ---
 
-## 🔒 Security & Local Execution Guarantee
+## 🔒 Security
 
-- **No Paid APIs**: FinBERT and Yahoo RSS feeds run 100% free with zero paid API subscriptions.
-- **No Ollama**: FinBERT executes natively inside PyTorch via Hugging Face Transformers.
-- **Protected Secrets**: `.streamlit/secrets.toml` is included in `.gitignore` to keep credentials secure.
+- **No Paid APIs**: FinBERT + Yahoo RSS = 100% free
+- **No Ollama**: FinBERT runs natively via PyTorch / Hugging Face Transformers
+- **Protected Secrets**: `.streamlit/secrets.toml` is in `.gitignore` — never committed
+- **Secret Scanning**: All tracked files verified clean of plaintext credentials before publishing
+
+---
+
+## 🤝 Contributing
+
+Contributions, issues, and feature requests are welcome!
+
+1. Fork the repository
+2. Create your feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -m 'feat: add your feature'`
+4. Push to branch: `git push origin feature/your-feature`
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
+
+---
+
+## 👤 Creator & Contact
+
+**Ranadeep Saha**  
+*Member, Google Developer Group*
+
+[![GitHub](https://img.shields.io/badge/GitHub-unknown404--practice-181717?logo=github)](https://github.com/unknown404-practice)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Ranadeep%20Saha-0A66C2?logo=linkedin)](https://www.linkedin.com/in/ranadeep-saha-a03296404/)
+[![Email](https://img.shields.io/badge/Email-ranadeep2021saha%40gmail.com-D14836?logo=gmail)](mailto:ranadeep2021saha@gmail.com)
+
+| | |
+|---|---|
+| 🐙 **GitHub** | [github.com/unknown404-practice](https://github.com/unknown404-practice) |
+| 💼 **LinkedIn** | [linkedin.com/in/ranadeep-saha-a03296404](https://www.linkedin.com/in/ranadeep-saha-a03296404/) |
+| 📧 **Email** | [ranadeep2021saha@gmail.com](mailto:ranadeep2021saha@gmail.com) |
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/unknown404-practice">Ranadeep Saha</a> · Member, Google Developer Group
+</p>

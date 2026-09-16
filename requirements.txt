@@ -1,8 +1,5 @@
-kafka-python>=2.0.2
-transformers>=4.35.0
-torch>=2.0.0
-pymongo>=4.6.0
-dnspython>=2.4.0
+# Streamlit Dashboard Dependencies (Lightweight for Streamlit Community Cloud 24/7 Global Deployment)
 streamlit>=1.30.0
 pandas>=2.1.0
-ipykernel>=6.25.0
+pymongo>=4.6.0
+dnspython>=2.4.0
