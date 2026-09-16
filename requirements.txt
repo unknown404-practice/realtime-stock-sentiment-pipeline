@@ -1,5 +1,6 @@
 # Streamlit Dashboard Dependencies (Lightweight for Streamlit Community Cloud 24/7 Global Deployment)
 streamlit>=1.30.0
 pandas>=2.1.0
-pymongo>=4.6.0
+pymongo[srv]>=4.6.0
 dnspython>=2.4.0
+certifi>=2024.0.0

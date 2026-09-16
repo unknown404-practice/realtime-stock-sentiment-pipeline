@@ -872,26 +872,38 @@ st.markdown(f"""
 # ==============================================================================
 # 2. Database Connection Resolver (Prioritize Local Fast Docker Mongo)
 # ==============================================================================
-@st.cache_resource
+def _read_secret(key, default=None):
+    """Read a value from st.secrets (any format) or os.getenv, with a default."""
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
+
 def get_mongo_connection():
     """
-    Cached connection manager.
+    Connection manager with retry logic.
     Supports seamless switching between ultra-fast local Docker MongoDB (<2ms)
     and 24/7 global MongoDB Atlas cloud cluster for Streamlit Community Cloud.
+    NOT cached so Atlas cold-starts on Streamlit Cloud get a fresh attempt each time
+    until a successful connection is established; thereafter stored in session_state.
     """
+    # Try local Docker MongoDB first (only valid locally)
     local_uri = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")
     try:
-        client = MongoClient(local_uri, serverSelectionTimeoutMS=250)
-        client.admin.command('ping')
-        return client, "Local Docker MongoDB (<2ms, Live Stream)"
+        c = MongoClient(local_uri, serverSelectionTimeoutMS=300)
+        c.admin.command('ping')
+        return c, "Local Docker MongoDB (<2ms, Live Stream)"
     except Exception:
         pass
 
-    # Fallback to secrets (Atlas) or env var
+    # Read Atlas URI from st.secrets or env
     atlas_uri = None
     try:
         if "MONGO_URI" in st.secrets:
-            atlas_uri = st.secrets["MONGO_URI"]
+            atlas_uri = str(st.secrets["MONGO_URI"])
         elif "mongo" in st.secrets and isinstance(st.secrets["mongo"], dict):
             atlas_uri = st.secrets["mongo"].get("uri")
     except Exception:
@@ -900,32 +912,96 @@ def get_mongo_connection():
         atlas_uri = os.getenv("MONGO_URI")
 
     if atlas_uri:
+        # Use a longer timeout for Streamlit Cloud cold starts (Atlas SRV DNS can be slow)
         try:
-            client = MongoClient(atlas_uri, serverSelectionTimeoutMS=2000)
-            client.admin.command('ping')
-            return client, "MongoDB Atlas (Global Cloud, Lifetime)"
-        except Exception:
-            pass
+            c = MongoClient(
+                atlas_uri,
+                serverSelectionTimeoutMS=10000,
+                connectTimeoutMS=10000,
+                socketTimeoutMS=10000,
+                tls=True,
+                tlsAllowInvalidCertificates=False,
+            )
+            c.admin.command('ping')
+            return c, "MongoDB Atlas (Global Cloud, Lifetime)"
+        except Exception as e:
+            # Last-ditch: try without explicit TLS flags (URI may already contain tls=true)
+            try:
+                c2 = MongoClient(atlas_uri, serverSelectionTimeoutMS=10000)
+                c2.admin.command('ping')
+                return c2, "MongoDB Atlas (Global Cloud, Lifetime)"
+            except Exception:
+                pass
 
     return None, "Demo / Offline Mode"
 
-client, DB_SOURCE_LABEL = get_mongo_connection()
-DB_NAME = os.getenv("DB_NAME", "StockDB")
-COLLECTION_NAME = os.getenv("COLLECTION_NAME", "news_sentiment")
-LOGS_COLLECTION_NAME = os.getenv("LOGS_COLLECTION_NAME", "pipeline_logs")
 
-# Automatic one-time seeding if pipeline_logs is fresh
+# Use session_state to cache the connection across reruns without @st.cache_resource
+# so that a failed cold-start attempt is retried on the next rerun instead of cached forever.
+if "mongo_client" not in st.session_state or st.session_state.get("mongo_client") is None:
+    _client, _label = get_mongo_connection()
+    st.session_state["mongo_client"] = _client
+    st.session_state["db_source_label"] = _label
+
+client = st.session_state["mongo_client"]
+DB_SOURCE_LABEL = st.session_state["db_source_label"]
+
+# Read DB / collection names from secrets first, then env, then defaults
+DB_NAME = _read_secret("DB_NAME", "StockDB")
+COLLECTION_NAME = _read_secret("COLLECTION_NAME", "news_sentiment")
+LOGS_COLLECTION_NAME = _read_secret("LOGS_COLLECTION_NAME", "pipeline_logs")
+
+
+# Automatic one-time seeding if pipeline_logs is fresh (runs only once per session)
 def auto_seed_pipeline_logs():
-    if client is not None:
-        try:
-            db = client[DB_NAME]
-            if db[LOGS_COLLECTION_NAME].estimated_document_count() == 0 and db[COLLECTION_NAME].estimated_document_count() > 0:
-                from backfill_logs import backfill_pipeline_logs
-                backfill_pipeline_logs(client=client, db_name=DB_NAME)
-        except Exception:
-            pass
+    if client is None:
+        return
+    # Only attempt once per session to avoid repeated slow Atlas calls
+    if st.session_state.get("_auto_seed_done"):
+        return
+    st.session_state["_auto_seed_done"] = True
+    try:
+        db = client[DB_NAME]
+        logs_count = db[LOGS_COLLECTION_NAME].estimated_document_count()
+        news_count = db[COLLECTION_NAME].estimated_document_count()
+        if logs_count == 0 and news_count > 0:
+            # Inline minimal backfill: seed up to 200 records from news_sentiment
+            from pymongo import ASCENDING
+            cursor = db[COLLECTION_NAME].find(
+                {},
+                {"ticker": 1, "headline": 1, "sentiment": 1, "confidence": 1, "timestamp": 1}
+            ).sort("_id", ASCENDING).limit(200)
+            batch = []
+            for doc in cursor:
+                iso_time = doc.get("timestamp") or datetime.now(timezone.utc).isoformat()
+                try:
+                    dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+                    time_str = dt.strftime("%H:%M:%S.%f")[:-3]
+                except Exception:
+                    time_str = "00:00:00.000"
+                ticker = doc.get("ticker", "TICKER")
+                sentiment = doc.get("sentiment", "NEUTRAL")
+                confidence = float(doc.get("confidence", 0.0))
+                headline = doc.get("headline", "")
+                preview = (headline[:55] + "...") if len(headline) > 55 else headline
+                batch.append({
+                    "time": time_str,
+                    "iso_time": iso_time,
+                    "level": "FINBERT",
+                    "component": "KAFKA_CONSUMER",
+                    "message": f"[{sentiment}] {ticker}: \"{preview}\" (conf: {confidence:.4f})",
+                    "ticker": ticker,
+                    "sentiment": sentiment,
+                    "confidence": confidence,
+                    "headline": headline,
+                })
+            if batch:
+                db[LOGS_COLLECTION_NAME].insert_many(batch)
+    except Exception:
+        pass
 
 auto_seed_pipeline_logs()
+
 
 # In-memory fast log buffer
 if "pipeline_logs" not in st.session_state:
