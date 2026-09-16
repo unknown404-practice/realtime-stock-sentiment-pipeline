@@ -195,7 +195,7 @@ def main():
     print(f"* Max Messages    : {'Infinite' if max_messages == 0 else max_messages}", flush=True)
     print("=" * 80, flush=True)
 
-    # 1. Resolve MongoDB URI
+    # 1. Resolve MongoDB URI (primary — local Docker)
     mongo_uri, uri_source = resolve_mongo_uri(args.mongo_uri)
     masked_uri = mongo_uri.split("@")[-1] if "@" in mongo_uri else mongo_uri
     print(f"\n[1/4] Connecting to MongoDB ({uri_source}: {masked_uri})...", flush=True)
@@ -210,6 +210,44 @@ def main():
         print(f"[Consumer Fatal] Failed to connect to MongoDB at {masked_uri}: {exc}", flush=True)
         print("Please ensure MongoDB container is running ('docker compose up -d').", flush=True)
         sys.exit(1)
+
+    # 1b. Optional: also connect to MongoDB Atlas for dual-write (so cloud dashboard stays live)
+    atlas_client = None
+    atlas_collection = None
+    atlas_logs_col = None
+    _atlas_uri = None
+    # Try reading from .streamlit/secrets.toml
+    secrets_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".streamlit", "secrets.toml")
+    if os.path.exists(secrets_path):
+        try:
+            with open(secrets_path, "r", encoding="utf-8") as _f:
+                for _line in _f:
+                    _lc = _line.strip()
+                    if _lc.startswith("MONGO_URI"):
+                        _parts = _lc.split("=", 1)
+                        if len(_parts) == 2:
+                            _uri = _parts[1].strip().strip('"').strip("'")
+                            if "mongodb+srv" in _uri and _uri != mongo_uri:
+                                _atlas_uri = _uri
+                            break
+        except Exception:
+            pass
+    if not _atlas_uri:
+        _atlas_uri = os.getenv("ATLAS_MONGO_URI") or os.getenv("MONGO_URI")
+        if _atlas_uri and "mongodb+srv" not in _atlas_uri:
+            _atlas_uri = None
+    if _atlas_uri and _atlas_uri != mongo_uri:
+        try:
+            atlas_client = MongoClient(_atlas_uri, serverSelectionTimeoutMS=8000)
+            atlas_client.admin.command("ping")
+            atlas_db = atlas_client[db_name]
+            atlas_collection = atlas_db[collection_name]
+            atlas_logs_col = atlas_db[logs_collection_name]
+            print(f"      [Dual-Write] Also connected to MongoDB Atlas for cloud sync.", flush=True)
+        except Exception as _ae:
+            print(f"      [Dual-Write] Atlas connection skipped: {_ae}", flush=True)
+            atlas_client = None
+
 
     # 2. Verify Kafka Reachability (fail-fast before loading heavy FinBERT model)
     print(f"\n[2/4] Verifying Kafka broker reachability at {bootstrap_servers}...", flush=True)
@@ -330,6 +368,18 @@ def main():
                         except Exception:
                             pass
 
+                        # Dual-write to Atlas (keeps Streamlit Cloud dashboard live)
+                        if atlas_collection is not None:
+                            try:
+                                atlas_collection.insert_one(dict(enriched_record))
+                            except Exception:
+                                pass
+                        if atlas_logs_col is not None:
+                            try:
+                                atlas_logs_col.insert_one(dict(log_entry))
+                            except Exception:
+                                pass
+
                         # Print clean live console log
                         print(f"[{sentiment_label}] {ticker}: {headline} (conf: {confidence_score:.4f})", flush=True)
 
@@ -359,8 +409,14 @@ def main():
             mongo_client.close()
         except Exception:
             pass
+        try:
+            if atlas_client is not None:
+                atlas_client.close()
+        except Exception:
+            pass
         print(f"[Consumer] Shutdown complete. Total messages processed: {processed_count}.", flush=True)
         sys.exit(0)
+
 
 
 if __name__ == "__main__":

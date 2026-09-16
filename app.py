@@ -952,6 +952,152 @@ COLLECTION_NAME = _read_secret("COLLECTION_NAME", "news_sentiment")
 LOGS_COLLECTION_NAME = _read_secret("LOGS_COLLECTION_NAME", "pipeline_logs")
 
 
+# ==============================================================================
+# 2b. Autonomous Cloud Ingestion Engine
+#     Runs every 30 s as a Streamlit fragment — fetches Yahoo Finance RSS, scores
+#     each headline with VADER (fast, CPU-only, no GPU needed), and writes enriched
+#     records to MongoDB Atlas.  This keeps the deployed Streamlit Cloud app alive
+#     24/7 even when all local Kafka workers are stopped.
+# ==============================================================================
+_CLOUD_TICKERS = [
+    ("AAPL",  "Apple"),
+    ("TSLA",  "Tesla"),
+    ("NVDA",  "NVIDIA"),
+    ("MSFT",  "Microsoft"),
+    ("AMZN",  "Amazon"),
+    ("GOOGL", "Alphabet"),
+    ("META",  "Meta"),
+    ("AMD",   "AMD"),
+    ("JPM",   "JPMorgan"),
+    ("BAC",   "Bank of America"),
+]
+
+
+def _vader_sentiment(text: str) -> tuple:
+    """Fast VADER sentiment — returns (POSITIVE|NEGATIVE|NEUTRAL, confidence 0-1)."""
+    try:
+        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+        _sia = SentimentIntensityAnalyzer()
+        vs = _sia.polarity_scores(text)
+        compound = vs["compound"]
+        if compound >= 0.05:
+            label = "POSITIVE"
+            conf = min(1.0, round(0.5 + compound * 0.5, 4))
+        elif compound <= -0.05:
+            label = "NEGATIVE"
+            conf = min(1.0, round(0.5 + abs(compound) * 0.5, 4))
+        else:
+            label = "NEUTRAL"
+            conf = round(0.5 + abs(compound), 4)
+        return label, conf
+    except Exception:
+        return "NEUTRAL", 0.5
+
+
+def _fetch_yahoo_rss(ticker: str) -> list:
+    """Fetch up to 5 recent headlines from Yahoo Finance RSS for a ticker."""
+    try:
+        import feedparser
+        url = (
+            f"https://feeds.finance.yahoo.com/rss/2.0/headline"
+            f"?s={ticker}&region=US&lang=en-US"
+        )
+        feed = feedparser.parse(url)
+        items = []
+        for entry in feed.entries[:5]:
+            title = entry.get("title", "").strip()
+            if title:
+                items.append(title)
+        return items
+    except Exception:
+        return []
+
+
+def _ingest_cloud_rss() -> int:
+    """
+    Core ingestion: fetch RSS headlines for all tickers, score with VADER,
+    write unseen records to MongoDB Atlas (news_sentiment + pipeline_logs).
+    Returns count of newly inserted records.
+    """
+    if client is None:
+        return 0
+    db = client[DB_NAME]
+    col = db[COLLECTION_NAME]
+    log_col = db[LOGS_COLLECTION_NAME]
+    inserted = 0
+    for ticker, _ in _CLOUD_TICKERS:
+        headlines = _fetch_yahoo_rss(ticker)
+        for headline in headlines:
+            if not headline:
+                continue
+            # Dedup: skip if exact headline already in DB for this ticker
+            try:
+                if col.find_one({"headline": headline, "ticker": ticker}, {"_id": 1}):
+                    continue
+            except Exception:
+                continue
+            sentiment, confidence = _vader_sentiment(headline)
+            now_utc = datetime.now(timezone.utc)
+            iso_ts = now_utc.isoformat()
+            time_str = now_utc.strftime("%H:%M:%S.%f")[:-3]
+            record = {
+                "ticker": ticker,
+                "headline": headline,
+                "timestamp": iso_ts,
+                "sentiment": sentiment,
+                "confidence": confidence,
+                "source": "yahoo_rss_cloud",
+            }
+            log_entry = {
+                "time": time_str,
+                "iso_time": iso_ts,
+                "level": "INGEST",
+                "component": "CLOUD_ENGINE",
+                "message": (
+                    f"[{sentiment}] {ticker}: \"{headline[:55]}...\""
+                    f" (conf: {confidence:.4f})"
+                ),
+                "ticker": ticker,
+                "sentiment": sentiment,
+                "confidence": confidence,
+                "headline": headline,
+                "source": "yahoo_rss_cloud",
+            }
+            try:
+                col.insert_one(record)
+                log_col.insert_one(log_entry)
+                inserted += 1
+            except Exception:
+                pass
+    return inserted
+
+
+@st.fragment(run_every=30)
+def _autonomous_cloud_engine():
+    """
+    Silent background ingestion fragment.
+    Runs every 30 s independently — fetches Yahoo Finance RSS, scores with VADER,
+    and writes new records to MongoDB Atlas to keep the dashboard live 24/7.
+    """
+    if client is None:
+        return
+    try:
+        n = _ingest_cloud_rss()
+        if n > 0:
+            now_str = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+            entry = {
+                "time": now_str,
+                "iso_time": datetime.now(timezone.utc).isoformat(),
+                "level": "INGEST",
+                "component": "CLOUD_ENGINE",
+                "message": f"[CLOUD ENGINE] Ingested {n} new headline(s) from Yahoo RSS → Atlas",
+            }
+            if "pipeline_logs" in st.session_state:
+                st.session_state["pipeline_logs"].insert(0, entry)
+    except Exception:
+        pass
+
+
 # Automatic one-time seeding if pipeline_logs is fresh (runs only once per session)
 def auto_seed_pipeline_logs():
     if client is None:
@@ -1347,6 +1493,10 @@ tab_feed, tab_logs, tab_architecture = st.tabs([
     "🖥️ Pipeline Logs",
     "🏛️ Architecture & Status"
 ])
+
+# Launch the autonomous 24/7 cloud ingestion engine (hidden — runs every 30 s)
+# This fragment is invoked outside tabs so it keeps firing regardless of active tab.
+_autonomous_cloud_engine()
 
 # ------------------------------------------------------------------------------
 # TAB 1: Live Market Stream (High-Frequency Streamlit Fragment)
