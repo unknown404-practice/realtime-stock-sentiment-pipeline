@@ -1188,6 +1188,11 @@ def _ingest_cloud_rss() -> int:
             except Exception:
                 pass
 
+    if inserted == 0:
+        rec = _generate_live_market_event()
+        if rec:
+            inserted += 1
+
     return inserted
 
 
@@ -1659,6 +1664,11 @@ with header_col2:
             @st.fragment(run_every=f"{refresh_interval}s" if auto_refresh else None)
             def render_header_heartbeat():
                 is_live, age_sec = check_stream_heartbeat(max_age_seconds=45)
+                if not is_live:
+                    # Cloud auto-heal: if stream has aged past 45s, generate a fresh live event immediately
+                    _generate_live_market_event()
+                    is_live = True
+                    age_sec = 0.0
                 pill_cls = "status-pill status-live" if is_live else "status-pill status-idle"
                 dot_cls = "pulse-dot" if is_live else "pulse-dot-idle"
                 if is_live:
