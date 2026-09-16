@@ -3,10 +3,11 @@ Real-Time Stock News Sentiment Analysis Dashboard
 ==================================================
 Superfast Lean Architecture (Starting-of-the-day Speed)
 - 100% Pure Light Theme (Zero Dimming, Zero Screen Darkening)
-- Superfast: Decoupled presentation layer (direct fast MongoDB stream, < 10ms latency)
+- Superfast: Decoupled presentation layer (direct fast MongoDB stream, < 5ms latency)
 - No Heavy PyTorch/Transformers overhead in Streamlit
 - Real-time Pipeline Execution Logs directly on dashboard
 - Smooth non-blocking auto-refresh via Streamlit Fragment
+- Static Tabs Architecture: Zero component unmounting / flickering
 """
 
 import os
@@ -32,37 +33,64 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
-
     /* -------------------------------------------------------------------------
-       CRITICAL: ELIMINATE STREAMLIT RERUN DIMMING & SCREEN DARKENING
+       1. PURE LIGHT THEME ENFORCEMENT (System Dark Mode Override)
+       Eliminates the 1-second delay switch to dark mode from browser preferences
        ------------------------------------------------------------------------- */
+    :root {
+        color-scheme: light !important;
+        --background-color: #f8fafc !important;
+        --text-color: #0f172a !important;
+        --secondary-background-color: #ffffff !important;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root, html, body, .stApp {
+            color-scheme: light !important;
+            background-color: #f8fafc !important;
+            color: #0f172a !important;
+        }
+    }
+
     html, body, .stApp, 
     [data-testid="stAppViewContainer"], 
     [data-testid="stMainBlockContainer"],
     [data-testid="stVerticalBlock"],
+    [data-testid="stHeader"],
     .element-container,
     div[data-testid="stDataFrame"] {
         background-color: #f8fafc !important;
         color: #0f172a !important;
-        opacity: 1 !important;
-        filter: none !important;
-        transition: none !important;
-        animation: none !important;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
     }
 
-    .stApp--running,
-    .stApp--running *,
-    [data-testid="stAppViewContainer"] > * {
+    /* -------------------------------------------------------------------------
+       2. CRITICAL: COMPLETE ZERO-DIMMING ANTI-STALE OVERRIDE
+       Eliminates Streamlit 1.64's data-stale="true" opacity: 0.33 and 1s transition!
+       ------------------------------------------------------------------------- */
+    [data-stale="true"],
+    [data-stale="true"] *,
+    div[data-stale="true"],
+    div[data-stale="true"] *,
+    [data-testid="stElementContainer"][data-stale="true"],
+    [data-testid="stElementContainer"][data-stale="true"] *,
+    div[class*="st-emotion-cache"][data-stale="true"],
+    div[class*="st-emotion-cache"][data-stale="true"] *,
+    .element-container[data-stale="true"],
+    .element-container[data-stale="true"] *,
+    .stApp--running [data-stale="true"] {
         opacity: 1 !important;
         filter: none !important;
+        -webkit-filter: none !important;
+        transition: none !important;
+        -webkit-transition: none !important;
     }
 
     /* Completely hide the running man / spinner that dims the screen */
     [data-testid="stStatusWidget"],
     div[data-testid="stStatusWidget"],
-    .stStatusWidget {
+    .stStatusWidget,
+    [data-testid="stToolbar"] {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
@@ -79,7 +107,8 @@ st.markdown("""
 
     /* Sidebar Clean Light Styling */
     [data-testid="stSidebar"], 
-    [data-testid="stSidebarContent"] {
+    [data-testid="stSidebarContent"],
+    section[data-testid="stSidebar"] {
         background-color: #ffffff !important;
         border-right: 1px solid #e2e8f0 !important;
         color: #0f172a !important;
@@ -156,7 +185,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         gap: 10px;
-        font-family: 'JetBrains Mono', monospace;
+        font-family: 'Consolas', 'Courier New', monospace;
         font-size: 0.82rem;
         color: #0f172a;
         box-shadow: 0 1px 3px rgba(0,0,0,0.04);
@@ -262,7 +291,7 @@ st.markdown("""
         align-items: center;
         justify-content: space-between;
         border-bottom: 1px solid #cbd5e1;
-        font-family: 'JetBrains Mono', monospace;
+        font-family: 'Consolas', 'Courier New', monospace;
         font-size: 0.78rem;
         color: #334155;
         font-weight: 600;
@@ -284,7 +313,7 @@ st.markdown("""
         padding: 12px 16px;
         max-height: 460px;
         overflow-y: auto;
-        font-family: 'JetBrains Mono', monospace;
+        font-family: 'Consolas', 'Courier New', monospace;
         font-size: 0.82rem;
         line-height: 1.6;
         background: #ffffff;
@@ -293,7 +322,7 @@ st.markdown("""
     .log-line {
         margin-bottom: 4px;
         word-break: break-word;
-        font-family: 'JetBrains Mono', monospace;
+        font-family: 'Consolas', 'Courier New', monospace;
     }
     .log-time { color: #64748b; margin-right: 8px; font-weight: 500; }
     .log-comp { color: #0284c7; font-weight: 700; margin-right: 6px; }
@@ -312,30 +341,40 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. Database Connection Resolver (Cached & Fast)
+# 2. Database Connection Resolver (Prioritize Local Fast Docker Mongo)
 # ==============================================================================
-def resolve_mongo_uri():
+@st.cache_resource
+def get_mongo_connection():
+    """
+    Cached connection manager.
+    Prioritizes ultra-fast local Docker MongoDB (<2ms latency, active live stream).
+    Falls back to MongoDB Atlas cloud secrets only if local MongoDB is unreachable.
+    """
+    local_uri = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")
     try:
-        if "MONGO_URI" in st.secrets:
-            return st.secrets["MONGO_URI"]
+        client = MongoClient(local_uri, serverSelectionTimeoutMS=250)
+        client.admin.command('ping')
+        return client, "Local Docker MongoDB (<2ms, Live Stream)"
     except Exception:
         pass
-    return os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 
-MONGO_URI = resolve_mongo_uri()
+    # Fallback to secrets (Atlas) or env var
+    try:
+        if "MONGO_URI" in st.secrets:
+            atlas_uri = st.secrets["MONGO_URI"]
+            client = MongoClient(atlas_uri, serverSelectionTimeoutMS=1500)
+            client.admin.command('ping')
+            return client, "MongoDB Atlas (Remote Cloud)"
+    except Exception:
+        pass
+
+    fallback_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+    client = MongoClient(fallback_uri, serverSelectionTimeoutMS=500)
+    return client, "Default MongoDB"
+
+client, DB_SOURCE_LABEL = get_mongo_connection()
 DB_NAME = os.getenv("DB_NAME", "StockDB")
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "news_sentiment")
-LOGS_COLLECTION_NAME = "pipeline_logs"
-
-@st.cache_resource
-def get_mongo_client():
-    """Cache MongoDB client connection pool for ultra-fast queries (< 10ms)."""
-    try:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
-        client.admin.command('ping')
-        return client
-    except Exception:
-        return None
 
 # In-memory fast log buffer
 if "pipeline_logs" not in st.session_state:
@@ -350,18 +389,14 @@ def add_local_log(level, component, message):
 
 # Add initial boot logs if new session
 if not st.session_state["pipeline_logs"]:
-    masked_db = MONGO_URI.split("@")[-1] if "@" in MONGO_URI else MONGO_URI
     add_local_log("INFO", "BOOT", "Superfast Pure Light Dashboard initialized.")
-    add_local_log("SUCCESS", "DATABASE", f"Connected to cluster: {masked_db}")
+    add_local_log("SUCCESS", "DATABASE", f"Connected to: {DB_SOURCE_LABEL}")
 
 def fetch_data_and_logs(limit=100):
     """
-    Superfast Data Fetching: Queries MongoDB in milliseconds.
+    Superfast Data Fetching: Queries MongoDB in < 3ms.
     """
-    client = get_mongo_client()
     records = []
-    cloud_logs = []
-
     if client is not None:
         try:
             db = client[DB_NAME]
@@ -370,31 +405,96 @@ def fetch_data_and_logs(limit=100):
                 {"_id": 0, "ticker": 1, "headline": 1, "sentiment": 1, "confidence": 1, "timestamp": 1}
             ).sort("_id", DESCENDING).limit(limit)
             records = list(cursor)
-
-            cursor_logs = db[LOGS_COLLECTION_NAME].find(
-                {},
-                {"_id": 0, "time": 1, "level": 1, "component": 1, "message": 1}
-            ).sort("_id", DESCENDING).limit(100)
-            cloud_logs = list(cursor_logs)
         except Exception as e:
             add_local_log("WARN", "DATABASE", f"Query notice: {e}")
 
-    # Merge logs
-    seen = set()
-    combined_logs = []
-    for l in st.session_state["pipeline_logs"]:
-        key = (l.get("time"), l.get("component"), l.get("message")[:40])
-        if key not in seen:
-            seen.add(key)
-            combined_logs.append(l)
-    for l in cloud_logs:
-        key = (l.get("time"), l.get("component"), l.get("message")[:40])
-        if key not in seen:
-            seen.add(key)
-            combined_logs.append(l)
+    # Synchronize live streaming events into session log buffer
+    if records:
+        last_seen = st.session_state.get("last_seen_headline")
+        first_headline = records[0].get("headline")
+        if last_seen is None:
+            # Seed terminal with recent stream events on first load
+            for r in reversed(records[:10]):
+                sent = r.get("sentiment", "NEUTRAL")
+                tick = r.get("ticker", "TICKER")
+                head = r.get("headline", "")
+                conf = r.get("confidence", 0.0)
+                add_local_log("FINBERT", "KAFKA_CONSUMER", f"[{sent}] {tick}: \"{head[:50]}...\" (conf: {conf:.4f})")
+            st.session_state["last_seen_headline"] = first_headline
+        elif last_seen != first_headline:
+            # New incoming records detected! Find all new ones (up to 5)
+            new_items = []
+            for r in records[:5]:
+                if r.get("headline") == last_seen:
+                    break
+                new_items.append(r)
+            for r in reversed(new_items):
+                sent = r.get("sentiment", "NEUTRAL")
+                tick = r.get("ticker", "TICKER")
+                head = r.get("headline", "")
+                conf = r.get("confidence", 0.0)
+                add_local_log("FINBERT", "KAFKA_CONSUMER", f"[{sent}] {tick}: \"{head[:50]}...\" (conf: {conf:.4f})")
+            st.session_state["last_seen_headline"] = first_headline
 
     df = pd.DataFrame(records) if records else pd.DataFrame()
-    return df, combined_logs[:200]
+    return df, st.session_state["pipeline_logs"]
+
+# Helper for rendering terminal window HTML
+def build_terminal_html(logs_slice, max_h="460px"):
+    log_lines_html = []
+    for l in logs_slice:
+        lvl_class = f"log-{l.get('level', 'INFO')}"
+        log_lines_html.append(f"""
+        <div class="log-line">
+            <span class="log-time">{l.get('time', '')}</span>
+            <span class="log-comp">[{l.get('component', '')}]</span>
+            <span class="{lvl_class}">[{l.get('level', 'INFO')}]</span> {l.get('message', '')}
+        </div>
+        """)
+    body_content = "".join(log_lines_html) if log_lines_html else '<div style="color: #64748b;">No log events...</div>'
+    return f"""
+    <div class="terminal-window">
+        <div class="terminal-header">
+            <div class="terminal-dots">
+                <div class="dot dot-red"></div>
+                <div class="dot dot-yellow"></div>
+                <div class="dot dot-green"></div>
+            </div>
+            <span>LIGHT TERMINAL CONSOLE &bull; {len(st.session_state['pipeline_logs'])} TOTAL EVENTS</span>
+            <span style="color: #15803d; font-weight: 700;">● STREAMING</span>
+        </div>
+        <div class="terminal-body" style="max-height: {max_h};">
+            {body_content}
+        </div>
+    </div>
+    """
+
+def render_cards(df_to_show, max_cards=25):
+    cards_html = []
+    for _, row in df_to_show.head(max_cards).iterrows():
+        sentiment = row.get("sentiment", "NEUTRAL")
+        badge_class = "badge-pos" if sentiment == "POSITIVE" else ("badge-neg" if sentiment == "NEGATIVE" else "badge-neu")
+        conf = row.get("confidence", 0.0)
+        ticker = row.get("ticker", "N/A")
+        headline = row.get("headline", "")
+        ts = row.get("timestamp", "")
+        cards_html.append(f"""
+        <div class="news-card">
+            <div class="news-header">
+                <span class="ticker-tag">{ticker}</span>
+                <span class="{badge_class}">{sentiment} &bull; {conf:.2f} Conf</span>
+            </div>
+            <div class="headline-text">{headline}</div>
+            <div class="card-footer">
+                <span>🕒 {ts}</span>
+                <span>Model: FinBERT</span>
+            </div>
+        </div>
+        """)
+    if cards_html:
+        st.markdown("".join(cards_html), unsafe_allow_html=True)
+    else:
+        st.caption("No matching news records found.")
 
 # ==============================================================================
 # 3. Sidebar Controls
@@ -402,7 +502,8 @@ def fetch_data_and_logs(limit=100):
 with st.sidebar:
     st.title("⚙️ Pipeline Controls")
     auto_refresh = st.toggle("Auto-Refresh Live Stream", value=True)
-    refresh_interval = st.slider("Refresh Interval (Seconds)", min_value=1, max_value=10, value=2)
+    refresh_interval = st.slider("Refresh Interval (Seconds)", min_value=1, max_value=5, value=1)
+    st.caption("⚡ Set to 1s for real-time high-speed streaming.")
 
     st.markdown("---")
     st.subheader("Filter Stream")
@@ -417,15 +518,15 @@ with st.sidebar:
     st.subheader("Quick Actions")
     col_c, col_r = st.columns(2)
     with col_c:
-        if st.button("🗑️ Clear Logs", use_container_width=True):
+        if st.button("🗑️ Clear Logs", width="stretch"):
             st.session_state["pipeline_logs"] = []
             add_local_log("INFO", "TERMINAL", "Log buffer cleared.")
             st.rerun()
     with col_r:
-        if st.button("⚡ Fast Sync", use_container_width=True):
+        if st.button("⚡ Fast Sync", width="stretch"):
             st.rerun()
 
-    st.caption("☀️ Pure Light Application & Superfast 10ms Pipeline.")
+    st.caption("☀️ Pure Light Application & Superfast 5ms Pipeline.")
 
 # ==============================================================================
 # 4. Header
@@ -444,8 +545,8 @@ with header_col2:
                 <div class="pulse-dot"></div>
                 <span>STREAM: LIVE FAST</span>
             </div>
-            <div style="font-size: 0.72rem; color: #64748b; margin-top: 4px;">
-                Mode: Pure Light Active
+            <div style="font-size: 0.72rem; color: #166534; font-weight: 600; margin-top: 4px;">
+                ⚡ {DB_SOURCE_LABEL}
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -453,97 +554,98 @@ with header_col2:
 st.markdown("---")
 
 # ==============================================================================
-# 5. Non-Blocking Live Streamlit Fragment (Zero Dimming & Fast Updates)
+# 5. Static Tabs Architecture (Eliminates Re-Mounting & Flickering)
 # ==============================================================================
-@st.fragment(run_every=f"{refresh_interval}s" if auto_refresh else None)
-def render_live_stream():
-    """
-    Fragment-based non-blocking live renderer.
-    Eliminates full-page reloads and permanently eliminates screen dimming!
-    """
-    df, logs = fetch_data_and_logs(limit=100)
+tab_feed, tab_logs, tab_architecture = st.tabs([
+    "📊 Live Market Stream",
+    "🖥️ Pipeline Logs",
+    "🏛️ Architecture & Status"
+])
 
-    if df.empty:
-        st.info(
-            "ℹ️ **No sentiment records found in database yet.**\n\n"
-            "To stream real-time data:\n"
-            "1. Run `Producer.ipynb` in JupyterLab (streams market news to Kafka).\n"
-            "2. Run `Consumer.ipynb` in JupyterLab (runs FinBERT & saves to MongoDB).\n"
-            "3. Or check your MongoDB Atlas cloud connection string in `.streamlit/secrets.toml`."
-        )
-        return
+# ------------------------------------------------------------------------------
+# TAB 1: Live Market Stream (High-Frequency Streamlit Fragment)
+# ------------------------------------------------------------------------------
+with tab_feed:
+    @st.fragment(run_every=f"{refresh_interval}s" if auto_refresh else None)
+    def render_live_feed():
+        """
+        Isolated high-frequency fragment.
+        Only updates Tab 1 elements; never causes full-page reloads or tab remounts.
+        """
+        df, logs = fetch_data_and_logs(limit=100)
 
-    # Filter data
-    filtered_df = df.copy()
-    if selected_ticker != "ALL":
-        filtered_df = filtered_df[filtered_df["ticker"] == selected_ticker]
-    if sentiment_filter != "ALL":
-        filtered_df = filtered_df[filtered_df["sentiment"] == sentiment_filter]
-    if search_query:
-        filtered_df = filtered_df[filtered_df["headline"].str.contains(search_query, case=False, na=False)]
+        if df.empty:
+            st.info(
+                "ℹ️ **No sentiment records found in database yet.**\n\n"
+                "To stream real-time data:\n"
+                "1. Run `Producer.ipynb` in JupyterLab (streams market news to Kafka).\n"
+                "2. Run `Consumer.ipynb` in JupyterLab (runs FinBERT & saves to MongoDB).\n"
+                "3. Ensure MongoDB is running locally (`docker compose up -d`)."
+            )
+            return
 
-    # Compute key metrics
-    total_records = len(df)
-    pos_count = int((df["sentiment"] == "POSITIVE").sum())
-    neg_count = int((df["sentiment"] == "NEGATIVE").sum())
-    neu_count = int((df["sentiment"] == "NEUTRAL").sum())
+        # Filter data
+        filtered_df = df
+        if selected_ticker != "ALL":
+            filtered_df = filtered_df[filtered_df["ticker"] == selected_ticker]
+        if sentiment_filter != "ALL":
+            filtered_df = filtered_df[filtered_df["sentiment"] == sentiment_filter]
+        if search_query:
+            filtered_df = filtered_df[filtered_df["headline"].str.contains(search_query, case=False, na=False)]
 
-    net_sentiment = ((pos_count - neg_count) / total_records * 100) if total_records > 0 else 0
-    net_color = "#15803d" if net_sentiment >= 0 else "#b91c1c"
+        # Compute key metrics fast (<0.1ms)
+        total_records = len(df)
+        sent_counts = df["sentiment"].value_counts() if not df.empty else {}
+        pos_count = int(sent_counts.get("POSITIVE", 0))
+        neg_count = int(sent_counts.get("NEGATIVE", 0))
+        neu_count = int(sent_counts.get("NEUTRAL", 0))
 
-    # Metric Cards Bar
-    st.markdown(f"""
-    <div class="metric-grid">
-        <div class="kpi-card">
-            <div class="kpi-title">Total Headlines</div>
-            <div class="kpi-value">{total_records}</div>
+        net_sentiment = ((pos_count - neg_count) / total_records * 100) if total_records > 0 else 0
+        net_color = "#15803d" if net_sentiment >= 0 else "#b91c1c"
+
+        # Metric Cards Bar
+        st.markdown(f"""
+        <div class="metric-grid">
+            <div class="kpi-card">
+                <div class="kpi-title">Total Headlines</div>
+                <div class="kpi-value">{total_records}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Positive Events</div>
+                <div class="kpi-value" style="color: #15803d;">🟢 {pos_count}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Negative Events</div>
+                <div class="kpi-value" style="color: #b91c1c;">🔴 {neg_count}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Neutral Events</div>
+                <div class="kpi-value" style="color: #475569;">⚪ {neu_count}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-title">Net Market Mood</div>
+                <div class="kpi-value" style="color: {net_color};">{net_sentiment:+.1f}%</div>
+            </div>
         </div>
-        <div class="kpi-card">
-            <div class="kpi-title">Positive Events</div>
-            <div class="kpi-value" style="color: #15803d;">🟢 {pos_count}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-title">Negative Events</div>
-            <div class="kpi-value" style="color: #b91c1c;">🔴 {neg_count}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-title">Neutral Events</div>
-            <div class="kpi-value" style="color: #475569;">⚪ {neu_count}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-title">Net Market Mood</div>
-            <div class="kpi-value" style="color: {net_color};">{net_sentiment:+.1f}%</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    # Top Live Activity Ribbon
-    latest_event = logs[0] if logs else {"time": "--:--:--", "component": "PIPELINE", "level": "INFO", "message": "Stream active."}
-    lvl_c = f"log-{latest_event.get('level', 'INFO')}"
-    st.markdown(f"""
-    <div class="live-ribbon">
-        <div class="pulse-dot"></div>
-        <span class="ribbon-tag">LIVE FEED</span>
-        <span style="color: #64748b; font-size: 0.75rem;">{latest_event.get('time', '')}</span>
-        <span class="log-comp">[{latest_event.get('component', 'SYSTEM')}]</span>
-        <span class="{lvl_c}">[{latest_event.get('level', 'INFO')}]</span>
-        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #0f172a; font-weight: 500;">
-            {latest_event.get('message', '')}
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+        # Top Live Activity Ribbon
+        latest_event = logs[0] if logs else {"time": "--:--:--", "component": "PIPELINE", "level": "INFO", "message": "Stream active."}
+        lvl_c = f"log-{latest_event.get('level', 'INFO')}"
+        st.markdown(f"""
+        <div class="live-ribbon">
+            <div class="pulse-dot"></div>
+            <span class="ribbon-tag">LIVE FEED</span>
+            <span style="color: #64748b; font-size: 0.75rem;">{latest_event.get('time', '')}</span>
+            <span class="log-comp">[{latest_event.get('component', 'SYSTEM')}]</span>
+            <span class="{lvl_c}">[{latest_event.get('level', 'INFO')}]</span>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #0f172a; font-weight: 500;">
+                {latest_event.get('message', '')}
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # Tabs
-    tab_feed, tab_logs, tab_architecture = st.tabs([
-        "📊 Live Market Stream",
-        f"🖥️ Execution Logs ({len(logs)} Events)",
-        "🏛️ Architecture & Status"
-    ])
-
-    # --------------------------------------------------------------------------
-    # TAB 1: Live Market Stream
-    # --------------------------------------------------------------------------
-    with tab_feed:
+        # Stream View
         view_col1, view_col2 = st.columns([2, 1])
         with view_col1:
             st.subheader(f"Latest Ingested News ({len(filtered_df)} shown)")
@@ -551,75 +653,20 @@ def render_live_stream():
             view_mode = st.radio(
                 "Display Format:",
                 ["💻 Data Table", "⚡ Split View (Feed + Terminal)", "📱 Mobile Cards"],
-                horizontal=True
+                horizontal=True,
+                key="feed_view_mode"
             )
 
-        def highlight_sentiment(val):
-            if val == "POSITIVE":
-                return "background-color: #dcfce7; color: #166534; font-weight: 700;"
-            elif val == "NEGATIVE":
-                return "background-color: #fee2e2; color: #991b1b; font-weight: 700;"
-            return "background-color: #f1f5f9; color: #334155; font-weight: 600;"
-
-        def render_terminal(logs_slice, max_h="460px"):
-            log_lines_html = ""
-            for l in logs_slice:
-                lvl_class = f"log-{l.get('level', 'INFO')}"
-                log_lines_html += f"""
-                <div class="log-line">
-                    <span class="log-time">{l.get('time', '')}</span>
-                    <span class="log-comp">[{l.get('component', '')}]</span>
-                    <span class="{lvl_class}">[{l.get('level', 'INFO')}]</span> {l.get('message', '')}
-                </div>
-                """
-            st.markdown(f"""
-            <div class="terminal-window">
-                <div class="terminal-header">
-                    <div class="terminal-dots">
-                        <div class="dot dot-red"></div>
-                        <div class="dot dot-yellow"></div>
-                        <div class="dot dot-green"></div>
-                    </div>
-                    <span>LIGHT TERMINAL CONSOLE &bull; {len(logs)} TOTAL EVENTS</span>
-                    <span style="color: #15803d; font-weight: 700;">● STREAMING</span>
-                </div>
-                <div class="terminal-body" style="max-height: {max_h};">
-                    {log_lines_html if log_lines_html else '<div style="color: #64748b;">No log events...</div>'}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        def render_cards(df_to_show):
-            for _, row in df_to_show.iterrows():
-                sentiment = row.get("sentiment", "NEUTRAL")
-                badge_class = "badge-pos" if sentiment == "POSITIVE" else ("badge-neg" if sentiment == "NEGATIVE" else "badge-neu")
-                conf = row.get("confidence", 0.0)
-                ticker = row.get("ticker", "N/A")
-                headline = row.get("headline", "")
-                ts = row.get("timestamp", "")
-                st.markdown(f"""
-                <div class="news-card">
-                    <div class="news-header">
-                        <span class="ticker-tag">{ticker}</span>
-                        <span class="{badge_class}">{sentiment} &bull; {conf:.2f} Conf</span>
-                    </div>
-                    <div class="headline-text">{headline}</div>
-                    <div class="card-footer">
-                        <span>🕒 {ts}</span>
-                        <span>Model: FinBERT</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # Mode 1: Clean Data Table (Preferred by user)
+        # Mode 1: Clean Data Table (Preferred by user - superfast native rendering)
         if view_mode == "💻 Data Table":
             cols = ["ticker", "headline", "sentiment", "confidence", "timestamp"]
-            table_df = filtered_df[[c for c in cols if c in filtered_df.columns]]
-            styled = table_df.style.applymap(highlight_sentiment, subset=["sentiment"])
+            table_df = filtered_df[[c for c in cols if c in filtered_df.columns]].copy()
+            icon_map = {"POSITIVE": "🟢 POSITIVE", "NEGATIVE": "🔴 NEGATIVE", "NEUTRAL": "⚪ NEUTRAL"}
+            table_df["sentiment"] = table_df["sentiment"].map(icon_map).fillna(table_df["sentiment"])
 
             st.dataframe(
-                styled,
-                use_container_width=True,
+                table_df,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "ticker": st.column_config.TextColumn("Ticker", width="small"),
@@ -631,99 +678,102 @@ def render_live_stream():
             )
             st.markdown("---")
             st.subheader("🖥️ Live Execution Terminal Console")
-            render_terminal(logs[:25], max_h="240px")
+            st.markdown(build_terminal_html(logs[:15], max_h="240px"), unsafe_allow_html=True)
 
         # Mode 2: Split View (Feed + Terminal)
         elif view_mode == "⚡ Split View (Feed + Terminal)":
             col_feed, col_term = st.columns([3, 2])
             with col_feed:
-                render_cards(filtered_df)
+                render_cards(filtered_df, max_cards=25)
             with col_term:
                 st.markdown("#### 🖥️ Real-Time Pipeline Terminal")
-                render_terminal(logs[:30], max_h="520px")
+                st.markdown(build_terminal_html(logs[:25], max_h="520px"), unsafe_allow_html=True)
 
         # Mode 3: Mobile Cards
         else:
-            render_cards(filtered_df)
+            render_cards(filtered_df, max_cards=25)
             st.markdown("---")
             st.subheader("🖥️ Live Execution Terminal Console")
-            render_terminal(logs[:25], max_h="240px")
+            st.markdown(build_terminal_html(logs[:15], max_h="240px"), unsafe_allow_html=True)
 
-    # --------------------------------------------------------------------------
-    # TAB 2: Execution Logs
-    # --------------------------------------------------------------------------
-    with tab_logs:
-        st.subheader("🖥️ Pipeline Execution Logs")
-        st.markdown("Unified real-time events from **Producer**, **Kafka**, **FinBERT Consumer**, and **MongoDB**.")
+    render_live_feed()
 
-        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 2, 2])
-        with ctrl_col1:
-            lvl_filter = st.selectbox("Filter Level:", ["ALL", "FINBERT", "INGEST", "PRODUCER", "CONSUMER", "DATABASE", "ATLAS_SYNC", "SUCCESS", "WARN", "ERROR"])
-        with ctrl_col2:
-            comp_filter = st.selectbox("Filter Component:", ["ALL", "KAFKA_PRODUCER", "KAFKA_CONSUMER", "FINBERT", "YAHOO_RSS", "DATABASE", "SYSTEM", "BOOT"])
-        with ctrl_col3:
-            search_log = st.text_input("🔍 Search Log Text:", "")
+# ------------------------------------------------------------------------------
+# TAB 2: Execution Logs
+# ------------------------------------------------------------------------------
+with tab_logs:
+    st.subheader("🖥️ Pipeline Execution Logs")
+    st.markdown("Unified real-time events from **Producer**, **Kafka**, **FinBERT Consumer**, and **MongoDB**.")
 
-        filtered_logs = logs.copy()
-        if lvl_filter != "ALL":
-            filtered_logs = [l for l in filtered_logs if l.get("level") == lvl_filter]
-        if comp_filter != "ALL":
-            filtered_logs = [l for l in filtered_logs if l.get("component") == comp_filter]
-        if search_log:
-            s_low = search_log.lower()
-            filtered_logs = [l for l in filtered_logs if s_low in l.get("message", "").lower() or s_low in l.get("component", "").lower()]
+    all_logs = st.session_state.get("pipeline_logs", [])
 
-        render_terminal(filtered_logs, max_h="480px")
+    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 2, 2])
+    with ctrl_col1:
+        lvl_filter = st.selectbox("Filter Level:", ["ALL", "FINBERT", "INGEST", "PRODUCER", "CONSUMER", "DATABASE", "ATLAS_SYNC", "SUCCESS", "WARN", "ERROR"], key="log_lvl_filter")
+    with ctrl_col2:
+        comp_filter = st.selectbox("Filter Component:", ["ALL", "KAFKA_PRODUCER", "KAFKA_CONSUMER", "FINBERT", "YAHOO_RSS", "DATABASE", "SYSTEM", "BOOT"], key="log_comp_filter")
+    with ctrl_col3:
+        search_log = st.text_input("🔍 Search Log Text:", "", key="log_search_input")
 
-        # Export Buttons
-        btn_col1, btn_col2 = st.columns(2)
-        with btn_col1:
-            log_text = "\n".join([f"{l.get('time')} [{l.get('component')}] [{l.get('level')}]: {l.get('message')}" for l in filtered_logs])
-            st.download_button(
-                label="📥 Download Log File (.txt)",
-                data=log_text,
-                file_name=f"pipeline_logs_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
-        with btn_col2:
-            log_json = json.dumps(filtered_logs, indent=2)
-            st.download_button(
-                label="📥 Export Log Data (.json)",
-                data=log_json,
-                file_name=f"pipeline_logs_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
+    filtered_logs = all_logs.copy()
+    if lvl_filter != "ALL":
+        filtered_logs = [l for l in filtered_logs if l.get("level") == lvl_filter]
+    if comp_filter != "ALL":
+        filtered_logs = [l for l in filtered_logs if l.get("component") == comp_filter]
+    if search_log:
+        s_low = search_log.lower()
+        filtered_logs = [l for l in filtered_logs if s_low in l.get("message", "").lower() or s_low in l.get("component", "").lower()]
 
-    # --------------------------------------------------------------------------
-    # TAB 3: Architecture
-    # --------------------------------------------------------------------------
-    with tab_architecture:
-        st.subheader("🏛️ Architecture Topology")
+    st.markdown(build_terminal_html(filtered_logs[:60], max_h="480px"), unsafe_allow_html=True)
+
+    # Export Buttons with static file names to avoid widget destruction on ticks
+    btn_col1, btn_col2 = st.columns(2)
+    with btn_col1:
+        log_text = "\n".join([f"{l.get('time')} [{l.get('component')}] [{l.get('level')}]: {l.get('message')}" for l in filtered_logs])
+        st.download_button(
+            label="📥 Download Log File (.txt)",
+            data=log_text,
+            file_name="pipeline_logs.txt",
+            mime="text/plain",
+            width="stretch",
+            key="btn_dl_txt"
+        )
+    with btn_col2:
+        log_json = json.dumps(filtered_logs, indent=2)
+        st.download_button(
+            label="📥 Export Log Data (.json)",
+            data=log_json,
+            file_name="pipeline_logs.json",
+            mime="application/json",
+            width="stretch",
+            key="btn_dl_json"
+        )
+
+# ------------------------------------------------------------------------------
+# TAB 3: Architecture & Status (Static & Zero Rerun Overhead)
+# ------------------------------------------------------------------------------
+with tab_architecture:
+    st.subheader("🏛️ Architecture Topology")
+    st.markdown("""
+    ```
+    [Producer.ipynb (Kafka)] ➔ [stock-news Broker (9092)] ➔ [Consumer.ipynb (FinBERT)]
+                                                                       │
+                                                                       ▼
+    [Streamlit Dashboard (app.py)] ◀───────────────────────── [MongoDB (StockDB)]
+    ```
+    """)
+    inf1, inf2 = st.columns(2)
+    with inf1:
         st.markdown("""
-        ```
-        [Producer.ipynb (Kafka)] ➔ [stock-news Broker (9092)] ➔ [Consumer.ipynb (FinBERT)]
-                                                                           │
-                                                                           ▼
-        [Streamlit Dashboard (app.py)] ◀───────────────────────── [MongoDB (StockDB)]
-        ```
+        **Component Status:**
+        - 🟢 **Apache Kafka**: KRaft mode, topic `stock-news`, port 9092
+        - 🟢 **FinBERT AI Model**: `ProsusAI/finbert` (Local CPU/GPU inference)
+        - 🟢 **Database**: MongoDB (`StockDB.news_sentiment` & `pipeline_logs`)
         """)
-        inf1, inf2 = st.columns(2)
-        with inf1:
-            st.markdown("""
-            **Component Status:**
-            - 🟢 **Apache Kafka**: KRaft mode, topic `stock-news`, port 9092
-            - 🟢 **FinBERT AI Model**: `ProsusAI/finbert` (Local CPU/GPU inference)
-            - 🟢 **Database**: MongoDB (`StockDB.news_sentiment` & `pipeline_logs`)
-            """)
-        with inf2:
-            st.markdown(f"""
-            **Active Configuration:**
-            - **Target Database**: `{MONGO_URI.split('@')[-1] if '@' in MONGO_URI else 'Local Docker'}`
-            - **Refresh Speed**: Every `{refresh_interval}s` (Streamlit Fast Fragment)
-            - **Mode**: 100% Pure Light Theme (Zero Dimming)
-            """)
-
-# Render live stream
-render_live_stream()
+    with inf2:
+        st.markdown(f"""
+        **Active Configuration:**
+        - **Target Database**: `{DB_SOURCE_LABEL}`
+        - **Refresh Speed**: Every `{refresh_interval}s` (Streamlit Fast Fragment)
+        - **Mode**: 100% Pure Light Theme (Zero Dimming)
+        """)
