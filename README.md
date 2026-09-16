@@ -1,29 +1,36 @@
 # 📈 Real-Time Stock-News Sentiment Pipeline
 
-A production-style, end-to-end data engineering and machine learning pipeline that streams simulated real-time financial market news through **Apache Kafka (KRaft mode)**, classifies sentiment using a **local FinBERT model** (`ProsusAI/finbert`), persists enriched records in **MongoDB**, and visualizes market sentiment live in a **Streamlit** dashboard.
+A production-grade, end-to-end data engineering and AI pipeline that streams real-time financial market news through **Apache Kafka (KRaft mode)** or **autonomous 24/7 cloud ingestion**, classifies sentiment using a **local FinBERT model** (`ProsusAI/finbert`), persists enriched records and distributed execution logs in **MongoDB (Local or Atlas Cloud)**, and visualizes market sentiment live in an interactive, **media-responsive Streamlit dashboard** with a built-in **real-time terminal log console**.
 
-> **100% Local & Free**: Runs completely on your local workstation without Ollama, without paid APIs, and without external cloud dependencies.
+> **100% Free & Open-Source**: Runs locally with Docker & PyTorch, and supports 24/7 autonomous uptime on Streamlit Community Cloud with MongoDB Atlas without paid APIs or external services.
 
 ---
 
 ## 🏛 Architecture Overview
 
 ```
-[Producer.ipynb]  (JupyterLab)
-       │  Generates realistic stock news JSON (AAPL, TSLA, NVDA, etc.)
-       ▼  Publishes to Kafka topic 'stock-news' every 2s
+[Producer.ipynb]  (JupyterLab / Local)
+       │  Streams real Yahoo Finance RSS news to Kafka topic 'stock-news'
+       ▼  Logs to MongoDB Atlas (StockDB.pipeline_logs)
 [Apache Kafka]   (Docker, KRaft mode, localhost:9092)
        │  Streams raw events
        ▼  Consumes streaming news
-[Consumer.ipynb]  (JupyterLab)
+[Consumer.ipynb]  (JupyterLab / Local)
        │  Local FinBERT model (ProsusAI/finbert via PyTorch/Transformers)
        │  Enriches with sentiment (POSITIVE/NEGATIVE/NEUTRAL) & confidence
-       ▼  Inserts enriched JSON records
-[MongoDB]         (Docker, localhost:27017, DB: StockDB, Collection: news_sentiment)
-       │  Persists latest sentiment stream
-       ▼  Queries latest 100 records
-[Streamlit App]   (app.py, localhost:8501)
-          Displays live metrics, Pos/Neg ratios, and color-coded sentiment feed
+       ▼  Inserts enriched records & logs to MongoDB
+[MongoDB (Atlas/Local)] (StockDB.news_sentiment & StockDB.pipeline_logs)
+       ▲                               ▲
+       │ Persists records & logs       │ Real-time log sync
+       │                               │
+[Autonomous 24/7 Cloud Engine] ────────┘
+       │  Direct Yahoo RSS & FinBERT in-app execution (when laptop is off)
+       ▼
+[Streamlit Dashboard (app.py)] (Desktop / Tablet / Mobile)
+       ├── Top Real-Time Activity Ticker (Pulsing live feed)
+       ├── Split View: News Cards + Live Terminal Console
+       ├── Full Pipeline Execution Log Center (Filtering, Search, TXT/JSON export)
+       └── Real-time KPI Metric Cards & Sentiment Analytics
 ```
 
 ---
@@ -34,11 +41,13 @@ A production-style, end-to-end data engineering and machine learning pipeline th
 stock-sentiment-pipeline/
 │
 ├── .venv/                 # Dedicated Python virtual environment (Python 3.10+)
+├── .streamlit/
+│   └── secrets.toml       # MongoDB Atlas connection URI (configured & gitignored)
 ├── docker-compose.yml     # Docker services: Kafka in KRaft mode & MongoDB
 ├── requirements.txt       # Python dependencies (kafka-python, transformers, torch, etc.)
-├── Producer.ipynb         # Jupyter notebook simulating & streaming stock news to Kafka
+├── Producer.ipynb         # Jupyter notebook streaming Yahoo market news to Kafka & Atlas
 ├── Consumer.ipynb         # Jupyter notebook classifying headlines with FinBERT & saving to MongoDB
-├── app.py                 # Streamlit real-time interactive sentiment dashboard
+├── app.py                 # Streamlit real-time dashboard with Live Terminal & 24/7 Cloud engine
 └── README.md              # Full documentation, architecture & run instructions
 ```
 
@@ -143,18 +152,49 @@ docker compose logs -f
 
 ### 6. Launch the Streamlit Live Dashboard (`app.py`)
 
-Open a new terminal window in the project folder with `.venv` activated:
+Open a terminal window in the project folder with `.venv` activated:
 
 ```bash
 streamlit run app.py
 ```
 
 - Streamlit will open automatically in your browser at `http://localhost:8501`.
-- Features:
-  - **Live Auto-Refresh**: Configurable refresh interval (default: 3 seconds).
-  - **Key Sentiment Metrics**: Positive Count, Negative Count, Neutral Count, and Pos/Neg Ratio.
-  - **Filter by Ticker**: Filter incoming headlines by ticker (`AAPL`, `TSLA`, `NVDA`, etc.).
-  - **Color-Coded Sentiment Table**: Soft green for POSITIVE, soft red for NEGATIVE, soft gray for NEUTRAL.
+- **Key Dashboard Features**:
+  - 🟢 **Top Real-Time Activity Ribbon**: Displays latest live stream event (ingest, inference, database sync) with pulsing status.
+  - ⚡ **Multi-View Modes**:
+    - `⚡ Split View (Feed + Live Terminal)`: Side-by-side news feed and real-time live terminal console.
+    - `📱 Mobile Card Feed`: Clean responsive cards with live console.
+    - `💻 Data Table`: Color-coded analytical table with live console.
+  - 🖥️ **Full Pipeline Execution Logs Tab**:
+    - Live counters: Total Events, Ingest & Kafka Events, FinBERT Inferences, Database Syncs.
+    - Filter by level (`ALL`, `FINBERT`, `INGEST`, `PRODUCER`, `CONSUMER`, `DATABASE`, `ATLAS_SYNC`, `WARN`, `ERROR`).
+    - Filter by component & instant keyword search.
+    - Export logs as `.txt` or `.json`.
+  - 🌐 **24/7 Autonomous Cloud Engine**: Automatically fetches Yahoo Finance RSS news and executes FinBERT classifications even if local notebooks are stopped.
+
+---
+
+### 7. Deploy 24/7 Free to Streamlit Community Cloud
+
+Anyone in the world can access your dashboard anytime, even when your laptop is turned off:
+
+1. **Push your code to GitHub**:
+   ```bash
+   git branch -M main
+   git remote add origin https://github.com/<YOUR_USERNAME>/stock-sentiment-pipeline.git
+   git push -u origin main
+   ```
+2. **Deploy on Streamlit Community Cloud**:
+   - Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
+   - Click **"New app"** -> Select your repository `stock-sentiment-pipeline` -> Branch `main` -> Main file `app.py`.
+   - Click **"Advanced settings..."** -> Under **Secrets**, add your MongoDB Atlas URI:
+     ```toml
+     MONGO_URI = "mongodb+srv://ranadeep2021saha_db_user:StockPass2026@cluster0.tq1iqxk.mongodb.net/?appName=Cluster0"
+     DB_NAME = "StockDB"
+     COLLECTION_NAME = "news_sentiment"
+     ```
+   - Click **"Deploy"**!
+3. Your public live URL (e.g. `https://stock-sentiment-pipeline.streamlit.app`) is now 24/7 active with live real-time financial news, FinBERT AI inference, and execution logs visible to everyone.
 
 ---
 
@@ -167,12 +207,12 @@ streamlit run app.py
 | `NoBrokersAvailable` error in Notebooks | Kafka container is still booting | Wait 10-15 seconds for KRaft quorum initialization, then re-run the notebook cell. |
 | FinBERT download slow or interrupted | Hugging Face network latency on first run | Run `python -c "from transformers import pipeline; pipeline('text-classification', model='ProsusAI/finbert')"` in terminal to pre-cache the model. |
 | Notebook cannot import `kafka` or `transformers` | Wrong Jupyter kernel selected | Change kernel in top-right corner to `Python (Stock Sentiment)`. |
-| MongoDB shows 0 records in Streamlit | Producer or Consumer not yet running | Start both `Producer.ipynb` and `Consumer.ipynb` to feed records into MongoDB. |
+| MongoDB shows 0 records in Streamlit | Producer or Consumer not yet running | The autonomous cloud engine will automatically start ingesting Yahoo news within 3 seconds. |
 
 ---
 
 ## 🔒 Security & Local Execution Guarantee
 
-- **No API Keys**: No OpenAI, Anthropic, or external API keys required.
+- **No Paid APIs**: FinBERT and Yahoo RSS feeds run 100% free with zero paid API subscriptions.
 - **No Ollama**: FinBERT executes natively inside PyTorch via Hugging Face Transformers.
-- **Data Privacy**: All simulated market data and predictions stay within your local machine.
+- **Protected Secrets**: `.streamlit/secrets.toml` is included in `.gitignore` to keep credentials secure.
