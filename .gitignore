@@ -1,0 +1,27 @@
+# Virtual Environment
+.venv/
+env/
+venv/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter & Notebook checkpoints
+.ipynb_checkpoints
+.jupyter/
+
+# Streamlit secrets (keep private)
+.streamlit/secrets.toml
+
+# Environment variables
+.env
+
+# Docker data volumes (if local)
+kafka_data/
+mongodb_data/
+
+# OS metadata
+.DS_Store
+Thumbs.db

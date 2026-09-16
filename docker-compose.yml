@@ -1,0 +1,89 @@
+services:
+  # ==========================================
+  # Apache Kafka in KRaft Mode (No ZooKeeper)
+  # ==========================================
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: stock-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      # KRaft cluster configuration
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Single-node cluster settings
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "4L622nShTUiAnsYh0-X41w"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1536M
+    restart: unless-stopped
+    networks:
+      - stock-network
+
+  # ==========================================
+  # Optional Kafka Topic Initializer
+  # ==========================================
+  init-kafka:
+    image: apache/kafka:3.7.0
+    container_name: stock-kafka-init
+    depends_on:
+      - kafka
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      # Block until Kafka broker is responsive
+      echo 'Waiting for Kafka to be ready...'
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
+      echo 'Creating Kafka topic: stock-news'
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic stock-news --replication-factor 1 --partitions 1
+      echo 'Topic stock-news verified/created.'
+      "
+    networks:
+      - stock-network
+
+  # ==========================================
+  # MongoDB Database
+  # ==========================================
+  mongodb:
+    image: mongo:7.0
+    container_name: stock-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: StockDB
+    volumes:
+      - mongodb_data:/data/db
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+    restart: unless-stopped
+    networks:
+      - stock-network
+
+volumes:
+  kafka_data:
+    driver: local
+  mongodb_data:
+    driver: local
+
+networks:
+  stock-network:
+    driver: bridge
