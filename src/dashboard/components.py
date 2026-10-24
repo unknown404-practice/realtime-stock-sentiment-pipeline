@@ -9,6 +9,163 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
+DARK_THEME_CSS = """
+:root {
+    data-theme="dark";
+    --color-scheme: dark;
+    --bg-page: #0b0f19;
+    --bg-card: #151d2e;
+    --bg-card-hover: #1e293b;
+    --bg-sidebar: #0d1322;
+    --border-color: #273549;
+    --border-subtle: #1e293b;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+    --accent-color: #38bdf8;
+    --card-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    --status-pill-bg: rgba(16, 185, 129, 0.16);
+    --status-pill-color: #34d399;
+    --status-pill-border: rgba(16, 185, 129, 0.4);
+    --status-idle-bg: rgba(245, 158, 11, 0.16);
+    --status-idle-color: #fbbf24;
+    --status-idle-border: rgba(245, 158, 11, 0.4);
+    --status-offline-bg: rgba(239, 68, 68, 0.16);
+    --status-offline-color: #f87171;
+    --status-offline-border: rgba(239, 68, 68, 0.4);
+    --db-badge-bg: rgba(56, 189, 248, 0.12);
+    --db-badge-color: #38bdf8;
+    --db-badge-border: rgba(56, 189, 248, 0.35);
+    --table-header-bg: #111827;
+    --table-row-hover: #1f293d;
+    --scrollbar-thumb: #334155;
+    --scrollbar-track: #0f172a;
+}
+
+/* True Dark Mode Canvas & Streamlit Container Overrides */
+html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+    background-color: #0b0f19 !important;
+    color: #f8fafc !important;
+}
+
+[data-testid="stHeader"] {
+    background-color: #0b0f19 !important;
+}
+
+[data-testid="stSidebar"], [data-testid="stSidebar"] > div {
+    background-color: #0d1322 !important;
+    border-right: 1px solid #273549 !important;
+}
+
+[data-testid="stSidebar"] * {
+    color: #f8fafc !important;
+}
+
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp p, .stApp span, .stApp label {
+    color: #f8fafc !important;
+}
+
+.stApp [data-testid="stCaptionContainer"] p {
+    color: #94a3b8 !important;
+}
+
+/* Bordered Containers & Metric Blocks */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    background-color: #151d2e !important;
+    border: 1px solid #273549 !important;
+    border-radius: 8px !important;
+}
+
+div[data-testid="stMetric"] {
+    background-color: #151d2e !important;
+    border: 1px solid #273549 !important;
+    border-radius: 8px !important;
+    padding: 0.8rem 1rem !important;
+}
+
+div[data-testid="stMetricValue"] {
+    color: #f8fafc !important;
+}
+
+div[data-testid="stMetricLabel"] p {
+    color: #94a3b8 !important;
+}
+
+/* Dropdowns, Inputs and Tabs in Dark Mode */
+div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, input {
+    background-color: #1e293b !important;
+    border-color: #273549 !important;
+    color: #f8fafc !important;
+}
+
+div[data-baseweb="popover"], div[data-baseweb="menu"] {
+    background-color: #151d2e !important;
+    color: #f8fafc !important;
+}
+
+button[role="tab"] {
+    color: #94a3b8 !important;
+}
+
+button[role="tab"][aria-selected="true"] {
+    color: #38bdf8 !important;
+    border-bottom: 2px solid #38bdf8 !important;
+}
+
+/* Tables and DataFrames */
+[data-testid="stDataFrame"] {
+    background-color: #151d2e !important;
+    border: 1px solid #273549 !important;
+    border-radius: 8px;
+}
+"""
+
+LIGHT_THEME_CSS = """
+:root {
+    data-theme="light";
+    --color-scheme: light;
+    --bg-page: #f8fafc;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f1f5f9;
+    --bg-sidebar: #f8fafc;
+    --border-color: #e2e8f0;
+    --border-subtle: #f1f5f9;
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+    --text-dim: #94a3b8;
+    --accent-color: #2563eb;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    --status-pill-bg: rgba(16, 185, 129, 0.12);
+    --status-pill-color: #059669;
+    --status-pill-border: rgba(16, 185, 129, 0.3);
+    --status-idle-bg: rgba(245, 158, 11, 0.12);
+    --status-idle-color: #d97706;
+    --status-idle-border: rgba(245, 158, 11, 0.3);
+    --status-offline-bg: rgba(239, 68, 68, 0.12);
+    --status-offline-color: #dc2626;
+    --status-offline-border: rgba(239, 68, 68, 0.3);
+    --db-badge-bg: #eff6ff;
+    --db-badge-color: #1d4ed8;
+    --db-badge-border: #bfdbfe;
+    --table-header-bg: #f8fafc;
+    --table-row-hover: #f1f5f9;
+    --scrollbar-thumb: #cbd5e1;
+    --scrollbar-track: #f1f5f9;
+}
+
+html, body, .stApp, [data-testid="stAppViewContainer"], .main {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+}
+
+div[data-testid="stMetric"] {
+    background-color: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    padding: 0.8rem 1rem !important;
+}
+"""
+
 
 def load_css(is_dark: bool = False) -> str:
     """Load external CSS stylesheet and apply dynamic theme root variable."""
@@ -18,8 +175,8 @@ def load_css(is_dark: bool = False) -> str:
         with open(css_path, "r", encoding="utf-8") as f:
             css_content = f.read()
 
-    theme_attr = 'data-theme="dark"' if is_dark else 'data-theme="light"'
-    return f"<style>\n:root {{\n    {theme_attr};\n}}\n{css_content}\n</style>"
+    theme_rules = DARK_THEME_CSS if is_dark else LIGHT_THEME_CSS
+    return f"<style>\n{theme_rules}\n{css_content}\n</style>"
 
 
 def render_header(db_label: str, is_live: bool, age_sec: Optional[float]):
