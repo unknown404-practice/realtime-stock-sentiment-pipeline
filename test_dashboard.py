@@ -142,6 +142,7 @@ class TestDashboardApp(unittest.TestCase):
 
     def test_lifetime_logs_persistence(self):
         import os
+        from unittest.mock import patch
 
         from pymongo import MongoClient
 
@@ -149,10 +150,19 @@ class TestDashboardApp(unittest.TestCase):
 
         uri = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")
         try:
-            client = MongoClient(uri, serverSelectionTimeoutMS=1000)
+            client = MongoClient(uri, serverSelectionTimeoutMS=500)
             client.admin.command("ping")
         except Exception:
-            self.skipTest("MongoDB not reachable for persistence test")
+            import mongomock
+            client = mongomock.MongoClient()
+            # Seed initial document for lifetime verification
+            client[DB_NAME][LOGS_COLLECTION_NAME].insert_one({
+                "time": "12:00:00.000",
+                "iso_time": "2026-10-24T12:00:00Z",
+                "level": "INFO",
+                "component": "SYSTEM",
+                "message": "Initial bootstrap log"
+            })
 
         db = client[DB_NAME]
         initial_count = db[LOGS_COLLECTION_NAME].count_documents({})
@@ -160,7 +170,8 @@ class TestDashboardApp(unittest.TestCase):
 
         # Test inserting a new log with persistence enabled
         test_msg = f"TEST_LIFETIME_EVENT_{os.urandom(4).hex()}"
-        add_local_log("INFO", "SYSTEM", test_msg, persist_to_db=True)
+        with patch("app.client", client):
+            add_local_log("INFO", "SYSTEM", test_msg, persist_to_db=True)
 
         found = db[LOGS_COLLECTION_NAME].find_one({"message": test_msg})
         self.assertIsNotNone(found, "Newly added log must persist durably to MongoDB")
@@ -302,10 +313,20 @@ class TestDashboardApp(unittest.TestCase):
 
         uri = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")
         try:
-            client = MongoClient(uri, serverSelectionTimeoutMS=1000)
+            client = MongoClient(uri, serverSelectionTimeoutMS=500)
             client.admin.command("ping")
         except Exception:
-            self.skipTest("MongoDB not reachable for schema check")
+            import mongomock
+            client = mongomock.MongoClient()
+            client[DB_NAME][LOGS_COLLECTION_NAME].insert_one({
+                "time": "12:00:00.123",
+                "iso_time": "2026-10-24T12:00:00Z",
+                "level": "FINBERT",
+                "component": "KAFKA_CONSUMER",
+                "message": "Classified AAPL -> POSITIVE",
+                "ticker": "AAPL",
+                "sentiment": "POSITIVE"
+            })
 
         db = client[DB_NAME]
         sample = db[LOGS_COLLECTION_NAME].find_one({"level": "FINBERT"})

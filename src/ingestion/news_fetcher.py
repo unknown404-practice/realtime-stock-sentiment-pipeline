@@ -172,12 +172,13 @@ def extract_ticker_from_text(text: str) -> Optional[str]:
 class NewsFetcher:
     """Fetches real market news with automated fallback and rate limit handling."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, finnhub_api_key: Optional[str] = None):
         settings = get_settings()
-        self.api_key = api_key or settings.finnhub_api_key
+        self.api_key = api_key or finnhub_api_key or settings.finnhub_api_key
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
         self._pool_index = 0
+        self.fallback_pool = REALISTIC_FINANCIAL_NEWS
 
     def fetch_from_finnhub(self, category: str = "general") -> List[Dict[str, Any]]:
         """Fetch real-time financial market news from Finnhub API."""
@@ -266,3 +267,27 @@ class NewsFetcher:
         self._pool_index += 1
         item["timestamp"] = datetime.now(timezone.utc).isoformat()
         return item
+
+    def fetch_all(self, limit_per_ticker: int = 2) -> List[Dict[str, Any]]:
+        """Fetch a batch of articles across supported tickers."""
+        results = []
+        for ticker in SUPPORTED_TICKERS:
+            matched = [item for item in REALISTIC_FINANCIAL_NEWS if item["ticker"] == ticker]
+            for m in matched[:limit_per_ticker]:
+                entry = dict(m)
+                entry["timestamp"] = datetime.now(timezone.utc).isoformat()
+                results.append(entry)
+        return results
+
+    def generate_event(self, ticker: Optional[str] = None) -> Dict[str, Any]:
+        """Generate a structured realistic event for dry-run or inspection."""
+        target_ticker = ticker or random.choice(SUPPORTED_TICKERS)
+        matched = [item for item in REALISTIC_FINANCIAL_NEWS if item["ticker"] == target_ticker]
+        if matched:
+            event = dict(random.choice(matched))
+        else:
+            event = dict(REALISTIC_FINANCIAL_NEWS[0])
+            event["ticker"] = target_ticker
+        event["timestamp"] = datetime.now(timezone.utc).isoformat()
+        return event
+

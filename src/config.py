@@ -116,6 +116,62 @@ try:
             env_file = ".env"
             extra = "ignore"
 
+        @property
+        def KAFKA_BOOTSTRAP_SERVERS(self) -> str:
+            return self.kafka_bootstrap_servers
+
+        @property
+        def KAFKA_TOPIC(self) -> str:
+            return self.kafka_topic
+
+        @property
+        def KAFKA_GROUP_ID(self) -> str:
+            return self.kafka_group_id
+
+        @property
+        def KAFKA_PARTITIONS(self) -> int:
+            return self.kafka_num_partitions
+
+        @property
+        def PUBLISH_INTERVAL_SECONDS(self) -> float:
+            return self.publish_interval
+
+        @property
+        def LOCAL_MONGO_URI(self) -> str:
+            return self.local_mongo_uri
+
+        @property
+        def MONGO_URI(self) -> Optional[str]:
+            return self.mongo_uri
+
+        @property
+        def DB_NAME(self) -> str:
+            return self.db_name
+
+        @property
+        def COLLECTION_NAME(self) -> str:
+            return self.collection_name
+
+        @property
+        def LOGS_COLLECTION_NAME(self) -> str:
+            return self.logs_collection_name
+
+        @property
+        def FINNHUB_API_KEY(self) -> Optional[str]:
+            return self.finnhub_api_key
+
+        @property
+        def MODEL_NAME(self) -> str:
+            return self.model_name
+
+        @property
+        def BATCH_SIZE(self) -> int:
+            return self.batch_size
+
+        @property
+        def DEFAULT_TICKERS(self) -> list:
+            return ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "JPM", "BAC"]
+
 except ImportError:
     @dataclass
     class Settings:  # type: ignore
@@ -136,6 +192,62 @@ except ImportError:
         model_name: str = _SECRETS.get("MODEL_NAME", os.getenv("MODEL_NAME", "ProsusAI/finbert"))
         batch_size: int = int(os.getenv("BATCH_SIZE", "16"))
 
+        @property
+        def KAFKA_BOOTSTRAP_SERVERS(self) -> str:
+            return self.kafka_bootstrap_servers
+
+        @property
+        def KAFKA_TOPIC(self) -> str:
+            return self.kafka_topic
+
+        @property
+        def KAFKA_GROUP_ID(self) -> str:
+            return self.kafka_group_id
+
+        @property
+        def KAFKA_PARTITIONS(self) -> int:
+            return self.kafka_num_partitions
+
+        @property
+        def PUBLISH_INTERVAL_SECONDS(self) -> float:
+            return self.publish_interval
+
+        @property
+        def LOCAL_MONGO_URI(self) -> str:
+            return self.local_mongo_uri
+
+        @property
+        def MONGO_URI(self) -> Optional[str]:
+            return self.mongo_uri
+
+        @property
+        def DB_NAME(self) -> str:
+            return self.db_name
+
+        @property
+        def COLLECTION_NAME(self) -> str:
+            return self.collection_name
+
+        @property
+        def LOGS_COLLECTION_NAME(self) -> str:
+            return self.logs_collection_name
+
+        @property
+        def FINNHUB_API_KEY(self) -> Optional[str]:
+            return self.finnhub_api_key
+
+        @property
+        def MODEL_NAME(self) -> str:
+            return self.model_name
+
+        @property
+        def BATCH_SIZE(self) -> int:
+            return self.batch_size
+
+        @property
+        def DEFAULT_TICKERS(self) -> list:
+            return ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "JPM", "BAC"]
+
 
 _settings_instance: Optional[Settings] = None
 
@@ -145,3 +257,7 @@ def get_settings() -> Settings:
     if _settings_instance is None:
         _settings_instance = Settings()
     return _settings_instance
+
+
+config = get_settings()
+

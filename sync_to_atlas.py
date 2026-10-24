@@ -18,6 +18,7 @@ if sys.platform == "win32":
         pass
 
 from src.config import get_settings
+from src.db.mongo import ensure_indexes
 
 settings = get_settings()
 
@@ -55,7 +56,8 @@ def sync():
         atlas_client = MongoClient(ATLAS_URI, serverSelectionTimeoutMS=8000)
         atlas_client.admin.command("ping")
         atlas_db = atlas_client[DB_NAME]
-        print("[+] Connected to MongoDB Atlas Cloud.")
+        ensure_indexes(atlas_db)
+        print("[+] Connected to MongoDB Atlas Cloud and verified essential indexes.")
     except Exception as e:
         print(f"[-] Failed to connect to MongoDB Atlas: {e}")
         sys.exit(1)

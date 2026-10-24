@@ -101,9 +101,9 @@ def backfill_pipeline_logs(client=None, db_name="StockDB", force_target_uri=None
         batch.append({
             "time": time_str,
             "iso_time": iso_time,
-            "level": "FINBERT",
-            "component": "KAFKA_CONSUMER",
-            "message": f"[{sentiment}] {ticker}: \"{preview}\" (conf: {confidence:.4f})",
+            "level": "INFO",
+            "component": "HISTORICAL_BACKFILL",
+            "message": f"Backfilled [{sentiment}] {ticker}: \"{preview}\" (conf: {confidence:.4f})",
             "ticker": ticker,
             "sentiment": sentiment,
             "confidence": confidence,

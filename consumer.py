@@ -49,6 +49,7 @@ from src.db.mongo import (
     MongoRepository,
     ensure_indexes,
     get_mongo_client,
+    insert_dlq_message,
     insert_pipeline_log,
     upsert_sentiment_batch,
 )
@@ -142,6 +143,18 @@ def parse_args():
         type=str,
         default=settings.db_name,
         help=f"MongoDB database name (default: {settings.db_name})"
+    )
+    parser.add_argument(
+        "--collection-name",
+        type=str,
+        default=settings.collection_name,
+        help=f"MongoDB sentiment collection name (default: {settings.collection_name})"
+    )
+    parser.add_argument(
+        "--logs-collection",
+        type=str,
+        default=settings.logs_collection_name,
+        help=f"MongoDB pipeline logs collection name (default: {settings.logs_collection_name})"
     )
     parser.add_argument(
         "--max-messages",
@@ -290,7 +303,13 @@ def main():
             if not messages_batch:
                 continue
 
-            raw_items = [msg.value for msg in messages_batch if isinstance(msg.value, dict)]
+            raw_items = []
+            for msg in messages_batch:
+                if isinstance(msg.value, dict) and msg.value.get("headline"):
+                    raw_items.append(msg.value)
+                else:
+                    insert_dlq_message(db, getattr(msg, "value", str(msg)), "Malformed payload or missing headline", source_topic=topic)
+
             enriched_records = enrich_items(raw_items, finbert)
 
             if not enriched_records:

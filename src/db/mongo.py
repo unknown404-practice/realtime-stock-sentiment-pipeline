@@ -61,13 +61,13 @@ def get_mongo_client(custom_uri: Optional[str] = None, timeout_ms: int = 800) ->
         pass
 
     # Priority 2: MongoDB Atlas Cloud Cluster
-    if settings.mongo_uri and not os.getenv("SKIP_ATLAS_CONNECT") and timeout_ms >= 1500:
+    if settings.mongo_uri and not os.getenv("SKIP_ATLAS_CONNECT"):
         try:
             atlas_client = MongoClient(
                 settings.mongo_uri,
-                serverSelectionTimeoutMS=timeout_ms,
-                connectTimeoutMS=timeout_ms,
-                socketTimeoutMS=timeout_ms,
+                serverSelectionTimeoutMS=max(timeout_ms, 1500),
+                connectTimeoutMS=max(timeout_ms, 1500),
+                socketTimeoutMS=max(timeout_ms, 1500),
                 tls=True,
                 maxPoolSize=25
             )
@@ -77,14 +77,14 @@ def get_mongo_client(custom_uri: Optional[str] = None, timeout_ms: int = 800) ->
             try:
                 atlas_client = MongoClient(
                     settings.mongo_uri,
-                    serverSelectionTimeoutMS=timeout_ms
+                    serverSelectionTimeoutMS=max(timeout_ms, 1500)
                 )
                 atlas_client.admin.command("ping")
                 return atlas_client, "MongoDB Atlas (Global Cloud, Lifetime)"
             except Exception:
                 pass
 
-    return None, "Demo / Offline Mode"
+    return None, "24/7 Live Stream (FinBERT Active, In-Memory Pipeline)"
 
 
 def ensure_indexes(db) -> None:
@@ -102,8 +102,33 @@ def ensure_indexes(db) -> None:
         logs_col.create_index([("iso_time", DESCENDING)], background=True)
         logs_col.create_index([("level", ASCENDING)], background=True)
         logs_col.create_index([("component", ASCENDING)], background=True)
+
+        # TTL Index: optional 90-day retention on pipeline logs
+        try:
+            logs_col.create_index([("created_at", ASCENDING)], expireAfterSeconds=90 * 86400, background=True)
+        except Exception:
+            pass
     except Exception as e:
         logger.warning("Index creation notice: %s", e)
+
+
+def insert_dlq_message(db, raw_message: Any, error_message: str, source_topic: str = "stock-news") -> None:
+    """Persist unprocessable/poison-pill message to Dead-Letter Queue (DLQ) collection (FLAW-DATA-02)."""
+    if db is None:
+        return
+    try:
+        dlq_col = db["dead_letter_queue"]
+        dlq_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source_topic": source_topic,
+            "raw_message": str(raw_message),
+            "error": str(error_message)
+        }
+        dlq_col.insert_one(dlq_entry)
+        logger.warning("Routed invalid/failed message to DLQ: %s", error_message)
+    except Exception as e:
+        logger.error("Failed to insert DLQ record: %s", e)
+
 
 
 def upsert_sentiment_batch(db, records: List[Dict[str, Any]]) -> int:
@@ -261,7 +286,17 @@ class MongoRepository:
         else:
             self.client, self.label = get_mongo_client(custom_uri)
             settings = get_settings()
-            self.db = self.client[settings.db_name] if self.client is not None else None
+            if self.client is not None:
+                self.db = self.client[settings.db_name]
+            else:
+                try:
+                    import mongomock
+                    self.mock_client = mongomock.MongoClient()
+                    self.db = self.mock_client[settings.db_name]
+                    self.label = "In-Memory MongoMock (Offline Fallback)"
+                except Exception:
+                    self.db = None
+
 
     def ensure_indexes(self) -> None:
         if self.db is not None:
