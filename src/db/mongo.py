@@ -222,11 +222,19 @@ def fetch_sentiment_records(db, limit: int = 100) -> List[Dict[str, Any]]:
 
     settings = get_settings()
     try:
+        # Filter for ISO 8601 timestamps starting with year digits to guarantee strict chronological order
         cursor = db[settings.collection_name].find(
-            {},
+            {"timestamp": {"$regex": "^[0-9]"}},
             {"_id": 0, "ticker": 1, "headline": 1, "sentiment": 1, "confidence": 1, "timestamp": 1, "source": 1, "url": 1}
         ).sort("timestamp", DESCENDING).limit(limit)
-        return list(cursor)
+        results = list(cursor)
+        if not results:
+            cursor_fallback = db[settings.collection_name].find(
+                {},
+                {"_id": 0, "ticker": 1, "headline": 1, "sentiment": 1, "confidence": 1, "timestamp": 1, "source": 1, "url": 1}
+            ).sort("timestamp", DESCENDING).limit(limit)
+            results = list(cursor_fallback)
+        return results
     except Exception as e:
         logger.error("Failed to fetch sentiment records: %s", e)
         return []
