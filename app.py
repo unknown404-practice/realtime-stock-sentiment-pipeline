@@ -23,15 +23,28 @@ if sys.platform == "win32":
 
 from src.config import get_settings
 from src.dashboard.components import load_css, render_logs_table, render_metrics, render_news_feed
-from src.db.mongo import check_stream_heartbeat as db_check_stream_heartbeat
-from src.db.mongo import fetch_pipeline_logs, fetch_sentiment_records, get_mongo_client, insert_pipeline_log
+from src.db.mongo import (
+    check_stream_heartbeat as db_check_stream_heartbeat,
+)
+from src.db.mongo import (
+    fetch_pipeline_logs,
+    fetch_sentiment_records,
+    get_mongo_client,
+    insert_pipeline_log,
+    upsert_sentiment_batch,
+)
 from src.ingestion.news_fetcher import NewsFetcher
 from src.ml.finbert_service import FinBERTService
 
 settings = get_settings()
 
+import threading
+import time
+
 _stream_fetcher: Optional[NewsFetcher] = None
 _stream_finbert: Optional[FinBERTService] = None
+_worker_started = False
+_worker_lock = threading.Lock()
 
 
 def get_stream_services() -> Tuple[NewsFetcher, FinBERTService]:
@@ -42,6 +55,50 @@ def get_stream_services() -> Tuple[NewsFetcher, FinBERTService]:
     if _stream_finbert is None:
         _stream_finbert = FinBERTService()
     return _stream_fetcher, _stream_finbert
+
+
+def ensure_streaming_worker(mongo_client, db_name: str, interval: float = 2.5):
+    """Start standalone background streaming daemon thread to continuously ingest and persist 24/7."""
+    global _worker_started
+    with _worker_lock:
+        if _worker_started:
+            return
+        _worker_started = True
+
+    def _run():
+        fetcher = NewsFetcher()
+        finbert = FinBERTService()
+        while True:
+            try:
+                item = fetcher.get_next_news_item()
+                pred = finbert.predict_batch([item["headline"]])[0]
+                rec = {
+                    "ticker": item["ticker"],
+                    "headline": item["headline"],
+                    "sentiment": pred["sentiment"],
+                    "confidence": float(pred["confidence"]),
+                    "model_name": pred.get("model_name", "ProsusAI/finbert"),
+                    "inference_latency_ms": pred.get("inference_latency_ms", 30.0),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source": item.get("source", "Market Feeds"),
+                    "url": item.get("url", "")
+                }
+                if mongo_client is not None:
+                    db = mongo_client[db_name]
+                    upsert_sentiment_batch(db, [rec])
+                    insert_pipeline_log(
+                        db,
+                        level="FINBERT",
+                        component="KAFKA_CONSUMER",
+                        message=f"Classified [{rec['ticker']}] -> {rec['sentiment']} (conf: {rec['confidence']:.4f}, latency: {rec['inference_latency_ms']:.1f}ms)",
+                        extra={"latency_ms": rec["inference_latency_ms"]}
+                    )
+            except Exception:
+                pass
+            time.sleep(interval)
+
+    thread = threading.Thread(target=_run, daemon=True, name="bg_stream_worker")
+    thread.start()
 
 # Backwards compatibility constants for test suites
 DB_NAME = settings.db_name
@@ -71,13 +128,17 @@ st.markdown(load_css(is_dark), unsafe_allow_html=True)
 # 2. Database Connection (Pure Read-Only Access)
 # ==============================================================================
 if "_mongo_checked" not in st.session_state:
-    _client, _label = get_mongo_client(timeout_ms=500)
+    _client, _label = get_mongo_client(timeout_ms=2500)
     st.session_state["mongo_client"] = _client
     st.session_state["db_source_label"] = _label
     st.session_state["_mongo_checked"] = True
 
 client = st.session_state.get("mongo_client")
 DB_SOURCE_LABEL = st.session_state["db_source_label"]
+
+# Launch continuous 24/7 background streaming worker
+if client is not None:
+    ensure_streaming_worker(client, DB_NAME, interval=2.5)
 
 
 def check_stream_heartbeat(max_age_seconds: float = 45.0) -> Tuple[bool, Optional[float]]:

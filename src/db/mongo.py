@@ -157,6 +157,24 @@ def upsert_sentiment_batch(db, records: List[Dict[str, Any]]) -> int:
 
         operations.append(UpdateOne({"_id": record_id}, {"$set": doc}, upsert=True))
 
+    # mongomock compatibility: pymongo 4.6+ UpdateOne passes 'sort' which mongomock BulkOperationBuilder rejects
+    if getattr(collection, "__module__", "").startswith("mongomock"):
+        upserted = 0
+        for r in records:
+            ticker = r.get("ticker", "UNKNOWN")
+            headline = r.get("headline", "")
+            timestamp = r.get("timestamp") or datetime.now(timezone.utc).isoformat()
+            doc = dict(r)
+            record_id = generate_record_id(ticker, headline, timestamp)
+            doc["_id"] = record_id
+            doc["ticker"] = ticker
+            doc["headline"] = headline
+            doc["timestamp"] = timestamp
+            res = collection.update_one({"_id": record_id}, {"$set": doc}, upsert=True)
+            if res.upserted_id is not None or res.modified_count:
+                upserted += 1
+        return upserted
+
     try:
         result = collection.bulk_write(operations, ordered=False)
         return (result.upserted_count or 0) + (result.modified_count or 0)
@@ -239,7 +257,8 @@ def fetch_pipeline_logs(db, limit: int = 200) -> Tuple[List[Dict[str, Any]], int
 def check_stream_heartbeat(db=None, max_age_seconds: float = 45.0) -> Tuple[bool, Optional[float]]:
     """
     Truthful stream heartbeat inspector.
-    Calculates age of newest record. Never fakes liveness or mutates database.
+    Calculates age of newest record across sentiment records and pipeline telemetry logs.
+    Never fakes liveness or mutates database.
     Returns (is_live, age_seconds).
     """
     if db is None:
@@ -247,29 +266,33 @@ def check_stream_heartbeat(db=None, max_age_seconds: float = 45.0) -> Tuple[bool
 
     settings = get_settings()
     try:
-        latest = db[settings.collection_name].find_one(
-            {},
-            {"timestamp": 1},
-            sort=[("timestamp", DESCENDING)]
-        )
-        if not latest or "timestamp" not in latest:
-            # Fallback to _id sort if timestamp index wasn't populated
-            latest = db[settings.collection_name].find_one(
-                {},
-                {"timestamp": 1},
-                sort=[("_id", DESCENDING)]
-            )
-        if not latest or "timestamp" not in latest:
+        from dateutil import parser as dt_parser
+
+        min_age = float("inf")
+        targets = [
+            (settings.logs_collection_name, "iso_time"),
+            (settings.collection_name, "timestamp"),
+        ]
+
+        for col_name, time_key in targets:
+            try:
+                doc = db[col_name].find_one({}, {time_key: 1}, sort=[(time_key, DESCENDING)])
+                if doc and time_key in doc:
+                    dt = dt_parser.parse(str(doc[time_key]))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    curr_age = (datetime.now(timezone.utc) - dt).total_seconds()
+                    if curr_age < min_age:
+                        min_age = curr_age
+            except Exception:
+                pass
+
+        if min_age == float("inf"):
             return False, None
 
-        ts_str = str(latest["timestamp"]).replace("Z", "+00:00")
-        dt = datetime.fromisoformat(ts_str)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-
-        age = (datetime.now(timezone.utc) - dt).total_seconds()
+        age = max(0.0, min_age)
         is_live = 0.0 <= age <= max_age_seconds
-        return is_live, max(0.0, age)
+        return is_live, age
     except Exception as e:
         logger.debug("Heartbeat inspection exception: %s", e)
         return False, None

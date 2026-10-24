@@ -1,32 +1,57 @@
 # syntax=docker/dockerfile:1
-FROM python:3.10-slim
 
-WORKDIR /app
+# ==========================================
+# Stage 1: Build Dependencies
+# ==========================================
+FROM python:3.10-slim AS builder
 
-# Install system dependencies
+WORKDIR /build
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency specifications
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
 COPY requirements.txt requirements-pipeline.txt pyproject.toml ./
 
-# Install python dependencies
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r requirements-pipeline.txt
 
-# Copy application source code
-COPY . .
+# ==========================================
+# Stage 2: Hardened Runtime Container
+# ==========================================
+FROM python:3.10-slim AS runtime
 
-# Expose Streamlit dashboard port
+WORKDIR /app
+
+# Install minimal runtime healthcheck dependency
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy isolated virtualenv from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Create secure non-root user
+RUN groupadd -g 10001 appuser && \
+    useradd -u 10001 -g appuser -s /bin/bash -m appuser
+
+# Copy application source code with non-root ownership
+COPY --chown=appuser:appuser . .
+
+USER appuser
+
 EXPOSE 8501
 
-# Healthcheck for Streamlit dashboard service
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8501/_stcore/health || exit 1
 
-# Default entrypoint runs the Streamlit presentation dashboard
 CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
