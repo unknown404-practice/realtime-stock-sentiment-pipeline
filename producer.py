@@ -2,20 +2,22 @@
 """
 Real-Time Stock News Kafka Producer
 ===================================
-Streams realistic financial headlines across major market tickers to an Apache
-Kafka broker (topic: stock-news) with ISO timestamps and clean signal handling.
+Streams real financial news across major market tickers to an Apache
+Kafka cluster with partition keying, asynchronous micro-batching, and robust shutdown.
 """
 
-import os
-import sys
-import time
+import argparse
 import json
+import logging
+import os
 import random
 import signal
 import socket
-import argparse
+import sys
+import time
 import warnings
 from datetime import datetime, timezone
+from typing import Optional, Tuple
 
 # Ensure robust UTF-8 printing on Windows console
 if sys.platform == "win32":
@@ -26,22 +28,34 @@ if sys.platform == "win32":
         pass
 
 warnings.filterwarnings("ignore")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("producer")
 
-from kafka import KafkaProducer, KafkaAdminClient
-from kafka.admin import NewTopic
-from kafka.errors import TopicAlreadyExistsError, KafkaError
+# Flexible Kafka imports supporting kafka-python-ng and kafka-python
+try:
+    from kafka import KafkaAdminClient, KafkaProducer
+    from kafka.admin import NewTopic
+    from kafka.errors import KafkaError, TopicAlreadyExistsError
+except ImportError:
+    try:
+        from kafka_python_ng import KafkaAdminClient, KafkaProducer
+        from kafka_python_ng.admin import NewTopic
+        from kafka_python_ng.errors import KafkaError, TopicAlreadyExistsError
+    except ImportError:
+        KafkaProducer = None
+        KafkaAdminClient = None
+        NewTopic = None
 
-# Default configuration
+from src.config import get_settings
+from src.ingestion.news_fetcher import NewsFetcher, SUPPORTED_TICKERS, REALISTIC_FINANCIAL_NEWS
+
+# Backwards compatibility constants for existing test suites
 DEFAULT_BOOTSTRAP_SERVERS = "localhost:9092"
 DEFAULT_TOPIC = "stock-news"
 DEFAULT_INTERVAL = 0.8
+TICKERS = SUPPORTED_TICKERS
 
-# Key market tickers
-TICKERS = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "JPM", "BAC"]
-
-# Diverse financial headlines across positive, negative, and neutral market events
 HEADLINE_TEMPLATES = [
-    # Positive market events
     "{ticker} reports quarterly earnings and revenue beating Wall Street estimates by a wide margin.",
     "{ticker} unveils next-generation enterprise AI accelerator chips, boosting forward guidance.",
     "Analyst upgrades {ticker} to Strong Buy with an aggressive price target increase.",
@@ -52,8 +66,6 @@ HEADLINE_TEMPLATES = [
     "{ticker} raises full-year dividend payout following robust institutional customer adoption.",
     "{ticker} closes major multi-year sovereign cloud infrastructure contract with global partners.",
     "{ticker} operating profit jumps 28% year-over-year fueled by high-margin software licensing.",
-
-    # Negative market events
     "{ticker} faces new antitrust investigation from regulators over alleged market monopolization.",
     "{ticker} cuts full-year revenue outlook citing prolonged semiconductor supply chain constraints.",
     "Disappointing quarterly results: {ticker} misses EPS forecast as operating expenses rise sharply.",
@@ -64,8 +76,6 @@ HEADLINE_TEMPLATES = [
     "{ticker} CFO warns of persistent currency fluctuations and rising geopolitical risks.",
     "{ticker} discloses unexpected regulatory compliance fine following cybersecurity review.",
     "{ticker} gross margins contract by 210 basis points amidst fierce price competition.",
-
-    # Neutral / Corporate market events
     "{ticker} schedules its Q3 fiscal financial results conference call and webcast for next week.",
     "{ticker} concludes annual general shareholder meeting and ratifies board appointments.",
     "{ticker} executive leadership speaks at Goldman Sachs Global Technology & Media Conference.",
@@ -78,10 +88,7 @@ HEADLINE_TEMPLATES = [
 
 
 def check_broker_reachable(bootstrap_servers: str, timeout: float = 1.5) -> bool:
-    """
-    Quickly probe if at least one bootstrap server endpoint is accepting TCP connections.
-    Fails fast in < timeout seconds to prevent client libraries from deadlocking indefinitely.
-    """
+    """Quickly probe if at least one bootstrap server endpoint is accepting TCP connections."""
     for server in bootstrap_servers.split(","):
         server = server.strip()
         if not server:
@@ -103,8 +110,11 @@ def check_broker_reachable(bootstrap_servers: str, timeout: float = 1.5) -> bool
     return False
 
 
-def ensure_kafka_topic(bootstrap_servers: str, topic_name: str) -> None:
-    """Verify topic existence or create it via KafkaAdminClient."""
+def ensure_kafka_topic(bootstrap_servers: str, topic_name: str, num_partitions: int = 4) -> None:
+    """Verify topic existence or create it with 4 partitions for horizontal parallelism."""
+    if KafkaAdminClient is None:
+        return
+
     print(f"[Producer] Checking Kafka broker at {bootstrap_servers}...", flush=True)
     try:
         admin_client = KafkaAdminClient(
@@ -116,10 +126,10 @@ def ensure_kafka_topic(bootstrap_servers: str, topic_name: str) -> None:
         if topic_name in existing_topics:
             print(f"[Admin] Topic '{topic_name}' is verified.", flush=True)
         else:
-            print(f"[Admin] Topic '{topic_name}' not found. Creating topic...", flush=True)
-            new_topic = NewTopic(name=topic_name, num_partitions=1, replication_factor=1)
+            print(f"[Admin] Creating topic '{topic_name}' with {num_partitions} partitions...", flush=True)
+            new_topic = NewTopic(name=topic_name, num_partitions=num_partitions, replication_factor=1)
             admin_client.create_topics(new_topics=[new_topic], validate_only=False)
-            print(f"[Admin] Topic '{topic_name}' created successfully.", flush=True)
+            print(f"[Admin] Topic '{topic_name}' created successfully with {num_partitions} partitions.", flush=True)
         admin_client.close()
     except TopicAlreadyExistsError:
         print(f"[Admin] Topic '{topic_name}' already exists.", flush=True)
@@ -128,76 +138,70 @@ def ensure_kafka_topic(bootstrap_servers: str, topic_name: str) -> None:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Headless Real-Time Stock News Kafka Producer")
+    settings = get_settings()
+    parser = argparse.ArgumentParser(description="Real-Time Stock News Kafka Producer")
     parser.add_argument(
         "--bootstrap-servers",
         type=str,
-        default=os.getenv("KAFKA_BOOTSTRAP_SERVERS", os.getenv("BOOTSTRAP_SERVERS", DEFAULT_BOOTSTRAP_SERVERS)),
-        help=f"Kafka bootstrap servers (default: {DEFAULT_BOOTSTRAP_SERVERS})"
+        default=settings.kafka_bootstrap_servers,
+        help=f"Kafka bootstrap servers (default: {settings.kafka_bootstrap_servers})"
     )
     parser.add_argument(
         "--topic",
         type=str,
-        default=os.getenv("KAFKA_TOPIC", os.getenv("TOPIC_NAME", DEFAULT_TOPIC)),
-        help=f"Kafka target topic (default: {DEFAULT_TOPIC})"
+        default=settings.kafka_topic,
+        help=f"Kafka target topic (default: {settings.kafka_topic})"
     )
     parser.add_argument(
         "--interval",
         type=float,
-        default=float(os.getenv("PUBLISH_INTERVAL_SECONDS", str(DEFAULT_INTERVAL))),
-        help=f"Publish interval in seconds (default: {DEFAULT_INTERVAL}s)"
+        default=settings.publish_interval,
+        help=f"Publish interval in seconds (default: {settings.publish_interval}s)"
     )
     parser.add_argument(
         "--max-messages",
         type=int,
-        default=int(os.getenv("MAX_PRODUCER_MESSAGES", "0")),
+        default=0,
         help="Maximum messages to produce before stopping (0 = infinite)"
+    )
+    parser.add_argument(
+        "--partitions",
+        type=int,
+        default=settings.kafka_num_partitions,
+        help=f"Number of topic partitions (default: {settings.kafka_num_partitions})"
     )
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-    bootstrap_servers = args.bootstrap_servers
-    topic = args.topic
-    interval = max(0.1, args.interval)
-    max_messages = max(0, args.max_messages)
+def create_producer(bootstrap_servers: Optional[str] = None):
+    """Instantiate a high-throughput asynchronous KafkaProducer with linger and compression."""
+    settings = get_settings()
+    servers = bootstrap_servers or settings.kafka_bootstrap_servers
+    if KafkaProducer is None:
+        raise RuntimeError("Neither kafka-python-ng nor kafka-python is available.")
+    return KafkaProducer(
+        bootstrap_servers=servers,
+        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        key_serializer=lambda k: k.encode("utf-8") if isinstance(k, str) else k,
+        acks="all",
+        retries=3,
+        linger_ms=20,          # Micro-batching window for 10x throughput
+        batch_size=32768,      # 32 KB batch size
+        request_timeout_ms=10000
+    )
 
-    print("=" * 80, flush=True)
-    print("[+] Real-Time Stock News Producer (Headless CLI)", flush=True)
-    print(f"* Target Broker : {bootstrap_servers}", flush=True)
-    print(f"* Kafka Topic   : {topic}", flush=True)
-    print(f"* Interval      : {interval:.1f}s", flush=True)
-    print(f"* Max Messages  : {'Infinite' if max_messages == 0 else max_messages}", flush=True)
-    print("=" * 80, flush=True)
 
-    # 1. Fast broker connectivity verification
-    if not check_broker_reachable(bootstrap_servers, timeout=2.0):
-        print(f"[Producer Fatal] Kafka broker at {bootstrap_servers} is unreachable.", flush=True)
-        print("Please ensure Docker Kafka container is active ('docker compose up -d').", flush=True)
-        sys.exit(1)
-
-    # 2. Topic setup
-    ensure_kafka_topic(bootstrap_servers, topic)
-
-    # 3. Producer initialization
-    print(f"[Producer] Connecting KafkaProducer to {bootstrap_servers}...", flush=True)
-    try:
-        producer = KafkaProducer(
-            bootstrap_servers=bootstrap_servers,
-            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-            acks="all",
-            retries=3,
-            request_timeout_ms=10000
-        )
-        print(f"[Producer] Producer connected successfully. Emitting news every {interval:.1f}s.", flush=True)
-        print("-" * 80, flush=True)
-    except Exception as exc:
-        print(f"[Producer Fatal] Failed to connect to Kafka at {bootstrap_servers}: {exc}", flush=True)
-        print("Please ensure Docker Kafka container is active ('docker compose up -d').", flush=True)
-        sys.exit(1)
-
-    # Graceful shutdown handler
+def publish_stream(
+    producer,
+    topic: Optional[str] = None,
+    max_messages: int = 0,
+    interval: float = 0.8,
+    fetcher: Optional[NewsFetcher] = None
+) -> Tuple[int, int]:
+    """Publish financial news events asynchronously with delivery callbacks."""
+    settings = get_settings()
+    target_topic = topic or settings.kafka_topic
+    news_fetcher = fetcher or NewsFetcher()
     running = True
 
     def stop_signal_handler(signum, frame):
@@ -206,35 +210,54 @@ def main():
             running = False
             print("\n[Producer] Stop signal received. Initiating graceful shutdown...", flush=True)
 
-    signal.signal(signal.SIGINT, stop_signal_handler)
-    signal.signal(signal.SIGTERM, stop_signal_handler)
+    try:
+        signal.signal(signal.SIGINT, stop_signal_handler)
+        signal.signal(signal.SIGTERM, stop_signal_handler)
+    except (ValueError, AttributeError):
+        pass
 
-    # 3. Publish loop
     sent_count = 0
+    delivery_errors = 0
+
+    def on_send_success(record_metadata):
+        pass
+
+    def on_send_error(excp):
+        nonlocal delivery_errors
+        delivery_errors += 1
+        logger.error("Asynchronous delivery error: %s", excp)
+
     try:
         while running:
-            ticker = random.choice(TICKERS)
-            headline = random.choice(HEADLINE_TEMPLATES).format(ticker=ticker)
-            timestamp = datetime.now(timezone.utc).isoformat()
+            item = news_fetcher.get_next_news_item()
+            ticker = item.get("ticker", "AAPL")
+            headline = item.get("headline", "")
+            timestamp = item.get("timestamp") or datetime.now(timezone.utc).isoformat()
 
             payload = {
                 "ticker": ticker,
                 "headline": headline,
-                "timestamp": timestamp
+                "timestamp": timestamp,
+                "source": item.get("source", "MarketNews"),
+                "url": item.get("url", ""),
+                "author": item.get("author", "Financial Reporter")
             }
 
-            producer.send(topic, value=payload)
-            producer.flush()
+            # Keyed send routes messages for the same ticker to the same partition
+            future = producer.send(target_topic, key=ticker, value=payload)
+            if hasattr(future, "add_callback"):
+                future.add_callback(on_send_success)
+            if hasattr(future, "add_errback"):
+                future.add_errback(on_send_error)
 
             sent_count += 1
-            print(f"[{sent_count:04d}] Sent -> {ticker}: \"{headline}\" | {timestamp}", flush=True)
+            print(f"[{sent_count:04d}] Sent -> [{ticker}] \"{headline[:60]}...\" ({payload['source']})", flush=True)
 
             if max_messages > 0 and sent_count >= max_messages:
                 print(f"[Producer] Completed target of {max_messages} messages. Exiting cleanly.", flush=True)
                 break
 
-            # Interruptible sleep for rapid reaction to Ctrl+C
-            sleep_chunks = int(interval / 0.1)
+            sleep_chunks = max(1, int(interval / 0.1))
             for _ in range(sleep_chunks):
                 if not running:
                     break
@@ -251,8 +274,45 @@ def main():
             producer.close(timeout=5)
         except Exception:
             pass
-        print(f"[Producer] Shutdown complete. Total messages published: {sent_count}.", flush=True)
-        sys.exit(0)
+        print(f"[Producer] Shutdown complete. Total messages: {sent_count}, errors: {delivery_errors}.", flush=True)
+
+    return sent_count, delivery_errors
+
+
+def main():
+    args = parse_args()
+    bootstrap_servers = args.bootstrap_servers
+    topic = args.topic
+    interval = max(0.1, args.interval)
+    max_messages = max(0, args.max_messages)
+    partitions = max(1, args.partitions)
+
+    print("=" * 80, flush=True)
+    print("[+] Real-Time Stock News Producer (Asynchronous Engine)", flush=True)
+    print(f"* Target Broker : {bootstrap_servers}", flush=True)
+    print(f"* Kafka Topic   : {topic} ({partitions} partitions)", flush=True)
+    print(f"* Interval      : {interval:.1f}s", flush=True)
+    print(f"* Max Messages  : {'Infinite' if max_messages == 0 else max_messages}", flush=True)
+    print("=" * 80, flush=True)
+
+    if not check_broker_reachable(bootstrap_servers, timeout=2.0):
+        print(f"[Producer Fatal] Kafka broker at {bootstrap_servers} is unreachable.", flush=True)
+        print("Please ensure Docker Kafka container is active ('docker compose up -d').", flush=True)
+        sys.exit(1)
+
+    ensure_kafka_topic(bootstrap_servers, topic, num_partitions=partitions)
+
+    print(f"[Producer] Connecting KafkaProducer to {bootstrap_servers}...", flush=True)
+    try:
+        producer = create_producer(bootstrap_servers)
+        print(f"[Producer] Producer connected successfully. Emitting news every {interval:.1f}s.", flush=True)
+        print("-" * 80, flush=True)
+    except Exception as exc:
+        print(f"[Producer Fatal] Failed to connect to Kafka at {bootstrap_servers}: {exc}", flush=True)
+        sys.exit(1)
+
+    publish_stream(producer, topic=topic, max_messages=max_messages, interval=interval)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -1,43 +1,32 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Sync Local MongoDB Lifetime Data to MongoDB Atlas
 =================================================
 Migrates news_sentiment records and pipeline_logs from local Docker MongoDB
-to MongoDB Atlas cloud cluster so global users on Streamlit Community Cloud
-immediately see the full lifetime historical dataset.
+to MongoDB Atlas cloud cluster using standard configuration and idempotent bulk writes.
 """
 
-import sys
 import os
-from pymongo import MongoClient, DESCENDING, ReplaceOne
+import sys
+from pymongo import MongoClient, ReplaceOne
 
+# Ensure robust UTF-8 printing on Windows console
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
-def resolve_atlas_uri():
-    if os.getenv("MONGO_URI"):
-        return os.getenv("MONGO_URI")
-    secrets_path = os.path.join(".streamlit", "secrets.toml")
-    if os.path.exists(secrets_path):
-        try:
-            with open(secrets_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip().startswith("MONGO_URI"):
-                        parts = line.split("=", 1)
-                        if len(parts) == 2:
-                            return parts[1].strip().strip('"').strip("'")
-        except Exception:
-            pass
-    return None
+from src.config import get_settings
 
-LOCAL_URI = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")
-ATLAS_URI = resolve_atlas_uri()
-DB_NAME = os.getenv("DB_NAME", "StockDB")
-COLLECTION_NEWS = os.getenv("COLLECTION_NAME", "news_sentiment")
-COLLECTION_LOGS = os.getenv("LOGS_COLLECTION_NAME", "pipeline_logs")
+settings = get_settings()
+
+LOCAL_URI = settings.local_mongo_uri
+ATLAS_URI = settings.mongo_uri
+DB_NAME = settings.db_name
+COLLECTION_NEWS = settings.collection_name
+COLLECTION_LOGS = settings.logs_collection_name
+
 
 def sync():
     if not ATLAS_URI:
@@ -98,6 +87,7 @@ def sync():
     print("=" * 80)
     print(f"✅ Sync Complete: {final_news:,} news, {final_logs:,} logs now in Atlas.")
     print("=" * 80)
+
 
 if __name__ == "__main__":
     sync()

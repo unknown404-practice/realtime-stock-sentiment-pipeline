@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=65.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-sentiment-pipeline"
+version = "2.0.0"
+description = "Enterprise-Grade Real-Time Stock News Sentiment Pipeline with Apache Kafka, FinBERT, MongoDB, and Streamlit"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Deep Data Engineering & ML Platform Team" }
+]
+keywords = ["stock", "sentiment", "finbert", "kafka", "mongodb", "streamlit", "nlp", "real-time"]
+
+dependencies = [
+    "streamlit>=1.37.0",
+    "pandas>=2.1.0",
+    "pymongo[srv]>=4.6.0",
+    "dnspython>=2.4.0",
+    "certifi>=2024.0.0",
+    "feedparser>=6.0.10",
+    "requests>=2.31.0",
+    "torch>=2.0.0",
+    "transformers>=4.35.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+]
+
+[project.optional-dependencies]
+kafka = [
+    "kafka-python-ng>=2.2.2",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "mongomock>=4.1.2",
+    "ruff>=0.3.0",
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --durations=5"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

@@ -1,0 +1,278 @@
+/* ==============================================================================
+   Stock Sentiment Dashboard Stylesheet
+   Externalized clean responsive CSS with dynamic light/dark multi-theme support
+   ============================================================================== */
+
+:root {
+    --color-scheme: light;
+    --bg-page: #f8fafc;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f1f5f9;
+    --bg-sidebar: #f8fafc;
+    --border-color: #e2e8f0;
+    --border-subtle: #f1f5f9;
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+    --text-dim: #94a3b8;
+    --accent-color: #2563eb;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    --status-pill-bg: rgba(16, 185, 129, 0.12);
+    --status-pill-color: #059669;
+    --status-pill-border: rgba(16, 185, 129, 0.3);
+    --status-idle-bg: rgba(245, 158, 11, 0.12);
+    --status-idle-color: #d97706;
+    --status-idle-border: rgba(245, 158, 11, 0.3);
+    --status-offline-bg: rgba(239, 68, 68, 0.12);
+    --status-offline-color: #dc2626;
+    --status-offline-border: rgba(239, 68, 68, 0.3);
+    --db-badge-bg: #eff6ff;
+    --db-badge-color: #1d4ed8;
+    --db-badge-border: #bfdbfe;
+    --table-header-bg: #f8fafc;
+    --table-row-hover: #f1f5f9;
+    --scrollbar-thumb: #cbd5e1;
+    --scrollbar-track: #f1f5f9;
+}
+
+[data-theme="dark"] {
+    --color-scheme: dark;
+    --bg-page: #0b0f19;
+    --bg-card: #151d2e;
+    --bg-card-hover: #1e293b;
+    --bg-sidebar: #0d1322;
+    --border-color: #273549;
+    --border-subtle: #1e293b;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+    --accent-color: #38bdf8;
+    --card-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    --status-pill-bg: rgba(16, 185, 129, 0.16);
+    --status-pill-color: #34d399;
+    --status-pill-border: rgba(16, 185, 129, 0.4);
+    --status-idle-bg: rgba(245, 158, 11, 0.16);
+    --status-idle-color: #fbbf24;
+    --status-idle-border: rgba(245, 158, 11, 0.4);
+    --status-offline-bg: rgba(239, 68, 68, 0.16);
+    --status-offline-color: #f87171;
+    --status-offline-border: rgba(239, 68, 68, 0.4);
+    --db-badge-bg: rgba(56, 189, 248, 0.12);
+    --db-badge-color: #38bdf8;
+    --db-badge-border: rgba(56, 189, 248, 0.35);
+    --table-header-bg: #111827;
+    --table-row-hover: #1f293d;
+    --scrollbar-thumb: #334155;
+    --scrollbar-track: #0f172a;
+}
+
+/* Base resets & Streamlit header override */
+[data-testid="stHeader"] {
+    background-color: transparent !important;
+}
+
+.main .block-container {
+    padding-top: 3.6rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 1400px;
+}
+
+/* Zero-dimming override for snappy live updates */
+[data-stale="true"] {
+    opacity: 1 !important;
+    transition: none !important;
+}
+
+/* Status pills & Pulse dots */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.status-live {
+    background-color: var(--status-pill-bg);
+    color: var(--status-pill-color);
+    border: 1px solid var(--status-pill-border);
+}
+
+.status-idle {
+    background-color: var(--status-idle-bg);
+    color: var(--status-idle-color);
+    border: 1px solid var(--status-idle-border);
+}
+
+.status-offline {
+    background-color: var(--status-offline-bg);
+    color: var(--status-offline-color);
+    border: 1px solid var(--status-offline-border);
+}
+
+.pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--status-pill-color);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+    animation: pulse 1.8s infinite;
+}
+
+.pulse-dot-idle {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--status-idle-color);
+}
+
+.pulse-dot-offline {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--status-offline-color);
+}
+
+@keyframes pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+/* Metric Cards */
+.metric-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 1.1rem 1.25rem;
+    box-shadow: var(--card-shadow);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.metric-title {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.4rem;
+}
+
+.metric-value {
+    color: var(--text-main);
+    font-size: 1.8rem;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+/* Sentiment badges */
+.badge-pos {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.badge-neg {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.badge-neu {
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+/* DataFrame and Slider styling */
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.df_dark_css {
+    color-scheme: dark;
+}
+
+[data-testid="stSlider"] {
+    padding-top: 0.5rem;
+}
+
+/* ==============================================================================
+   Responsive Breakpoints
+   ============================================================================== */
+
+@media (min-width: 1200px) {
+    .main .block-container {
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+}
+
+@media (min-width: 992px) and (max-width: 1199px) {
+    .main .block-container {
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+    }
+}
+
+@media (min-width: 768px) and (max-width: 991px) {
+    .main .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+}
+
+@media (max-width: 767px) {
+    .main .block-container {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+        padding-top: 2.5rem !important;
+    }
+    .metric-value {
+        font-size: 1.4rem;
+    }
+}
+
+@media (max-width: 520px) {
+    .status-pill {
+        font-size: 0.7rem;
+        padding: 0.25rem 0.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .metric-title {
+        font-size: 0.72rem;
+    }
+}
+
+@media (hover: none) and (pointer: coarse) {
+    .metric-card {
+        padding: 0.85rem 1rem;
+    }
+    .metric-card:hover {
+        transform: none;
+    }
+}

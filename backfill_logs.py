@@ -10,9 +10,11 @@ import os
 from datetime import datetime, timezone
 from pymongo import MongoClient, DESCENDING, ASCENDING
 
+from src.config import get_settings
+
 def get_mongo_client():
-    # 1. Try Local Docker MongoDB first
-    local_uri = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")
+    settings = get_settings()
+    local_uri = settings.local_mongo_uri
     try:
         c = MongoClient(local_uri, serverSelectionTimeoutMS=500)
         c.admin.command("ping")
@@ -20,23 +22,15 @@ def get_mongo_client():
     except Exception:
         pass
 
-    # 2. Try Atlas secrets
-    secrets_file = os.path.join(".streamlit", "secrets.toml")
-    if os.path.exists(secrets_file):
+    if settings.mongo_uri:
         try:
-            with open(secrets_file, "r") as f:
-                for line in f:
-                    if line.strip().startswith("MONGO_URI"):
-                        atlas_uri = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        c = MongoClient(atlas_uri, serverSelectionTimeoutMS=2000)
-                        c.admin.command("ping")
-                        return c, atlas_uri, "MongoDB Atlas (Remote Cloud)"
+            c = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=2000)
+            c.admin.command("ping")
+            return c, settings.mongo_uri, "MongoDB Atlas (Remote Cloud)"
         except Exception:
             pass
 
-    # 3. Fallback
-    fallback_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-    return MongoClient(fallback_uri, serverSelectionTimeoutMS=1000), fallback_uri, "Fallback MongoDB"
+    return MongoClient(local_uri, serverSelectionTimeoutMS=1000), local_uri, "Fallback MongoDB"
 
 def backfill_pipeline_logs(client=None, db_name="StockDB", force_target_uri=None):
     if force_target_uri:
@@ -80,7 +74,6 @@ def backfill_pipeline_logs(client=None, db_name="StockDB", force_target_uri=None
     inserted_count = 0
     BATCH_SIZE = 1000
 
-    # If some logs already exist, grab existing iso_times to avoid duplicates
     existing_iso_times = set()
     if total_logs > 0:
         for l in logs_col.find({}, {"iso_time": 1}):
@@ -93,7 +86,6 @@ def backfill_pipeline_logs(client=None, db_name="StockDB", force_target_uri=None
             continue
 
         try:
-            # Extract time portion (HH:MM:SS.mmm)
             dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
             time_str = dt.strftime("%H:%M:%S.%f")[:-3]
         except Exception:
@@ -103,25 +95,24 @@ def backfill_pipeline_logs(client=None, db_name="StockDB", force_target_uri=None
         sentiment = doc.get("sentiment", "NEUTRAL")
         confidence = float(doc.get("confidence", 0.0))
         headline = doc.get("headline", "")
-        preview_head = headline[:55] + "..." if len(headline) > 55 else headline
+        preview = (headline[:55] + "...") if len(headline) > 55 else headline
 
-        log_entry = {
+        batch.append({
             "time": time_str,
             "iso_time": iso_time,
             "level": "FINBERT",
             "component": "KAFKA_CONSUMER",
-            "message": f"[{sentiment}] {ticker}: \"{preview_head}\" (conf: {confidence:.4f})",
+            "message": f"[{sentiment}] {ticker}: \"{preview}\" (conf: {confidence:.4f})",
             "ticker": ticker,
             "sentiment": sentiment,
             "confidence": confidence,
             "headline": headline
-        }
-        batch.append(log_entry)
+        })
 
         if len(batch) >= BATCH_SIZE:
             logs_col.insert_many(batch)
             inserted_count += len(batch)
-            print(f"[Backfill] Inserted {inserted_count} records into pipeline_logs...")
+            print(f"[Backfill] Synchronized {inserted_count}/{total_sentiment} logs...")
             batch = []
 
     if batch:
@@ -129,7 +120,7 @@ def backfill_pipeline_logs(client=None, db_name="StockDB", force_target_uri=None
         inserted_count += len(batch)
 
     final_count = logs_col.count_documents({})
-    print(f"[Backfill] Synchronization complete! Total records in pipeline_logs: {final_count} (+{inserted_count} added).")
+    print(f"✅ [Backfill Complete] Inserted {inserted_count} new logs. Total pipeline_logs: {final_count}")
     return final_count
 
 if __name__ == "__main__":

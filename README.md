@@ -34,7 +34,7 @@
 
 The **Real-Time Stock News Sentiment Pipeline** is a distributed streaming intelligence platform engineered to ingest high-frequency financial headlines, perform deep contextual sentiment classification via **FinBERT** (`ProsusAI/finbert`), persist real-time enriched data and audit telemetry into **MongoDB Atlas**, and deliver live market analytics through a reactive **Streamlit** dashboard.
 
-Designed for high availability, the system operates in a dual-mode hybrid architecture: local Kafka streaming workers provide sub-second FinBERT batch inference, while an embedded autonomous cloud engine guarantees 24/7 continuous data freshness and active heartbeats on **Streamlit Community Cloud** even when local machines are offline.
+Designed around clean CQRS (Command Query Responsibility Segregation) principles, the system decouples high-throughput event streaming and PyTorch inference pipelines (`src/`) from the presentation tier (`app.py`), guaranteeing zero deceptive side effects, robust idempotent bulk upserts, and comprehensive observability.
 
 ---
 
@@ -59,11 +59,7 @@ flowchart TD
         F --> H["Collection: pipeline_logs<br/>(Execution Audit Trails)"]
     end
 
-    subgraph CLOUD_ENGINE["4. AUTONOMOUS ENGINE (24/7)"]
-        I["Autonomous Cloud Engine<br/>(Embedded in Streamlit)"] -->|Failsafe Live Stream| F
-    end
-
-    subgraph VISUALIZATION["5. REACTIVE DASHBOARD"]
+    subgraph VISUALIZATION["4. REACTIVE DASHBOARD (PURE READS)"]
         F -->|High-Frequency Streamlit Fragment| J["Streamlit Dashboard<br/>(app.py)"]
         J --> K["Live Market Stream Table"]
         J --> L["Dynamic Heartbeat Badge"]
@@ -74,7 +70,6 @@ flowchart TD
     style INGESTION fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff
     style INFERENCE fill:#1e293b,stroke:#8b5cf6,stroke-width:2px,color:#fff
     style STORAGE fill:#1e293b,stroke:#10b981,stroke-width:2px,color:#fff
-    style CLOUD_ENGINE fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#fff
     style VISUALIZATION fill:#1e293b,stroke:#ec4899,stroke-width:2px,color:#fff
 ```
 
@@ -83,8 +78,7 @@ flowchart TD
 2. **Distributed Streaming**: Apache Kafka operates in modern **KRaft mode** (no ZooKeeper dependency), managing event partitions with guaranteed ordering.
 3. **Deep Financial NLP**: The consumer processes text payloads through **FinBERT**, classifying tone (`POSITIVE`, `NEGATIVE`, `NEUTRAL`) and extracting granular confidence scores.
 4. **Cloud Persistence**: Enriched records and execution logs are committed to **MongoDB Atlas** with ISO UTC timestamps.
-5. **Autonomous Cloud Engine**: An embedded self-healing engine ensures continuous streaming on Streamlit Cloud regardless of local worker states.
-6. **Reactive Dashboard**: Streamlit `@st.fragment` isolated updates refresh tables, metrics, and terminal logs without full-page reloads or screen dimming.
+5. **Reactive Dashboard**: Streamlit `@st.fragment` isolated updates refresh tables, metrics, and terminal logs without full-page reloads or screen dimming.
 
 ---
 
@@ -95,7 +89,7 @@ flowchart TD
 | **Real-Time Streaming** | Apache Kafka KRaft cluster | Sub-second event propagation without ZooKeeper overhead |
 | **Financial AI Model** | `ProsusAI/finbert` (Hugging Face) | Specialized financial vocabulary; far superior to generic sentiment models |
 | **Zero External API Costs** | Local PyTorch inference & VADER engine | 100% free; zero dependence on paid third-party APIs |
-| **Dual-Mode Operation** | Hybrid local Kafka workers + Cloud Engine | Heavy FinBERT inference locally; 24/7 autonomous streaming on Cloud |
+| **Idempotent Storage** | Deterministic SHA-256 Bulk Upserts | Exactly-once persistence semantics under at-least-once streaming delivery |
 | **Dynamic Stream Heartbeat** | Active pulse detection with age tracking | Live visual badge: `STREAM: LIVE FAST` (pulsing green) or `STREAM: IDLE` |
 | **Audit Log Terminal** | In-app terminal viewer with filtering | Inspect live execution telemetry, filter by severity level, and export logs |
 | **Anti-Dimming UI** | Custom Streamlit CSS & fragment execution | Zero screen dimming or tab jumping during high-frequency updates |
@@ -117,26 +111,39 @@ flowchart TD
 ```
 realtime-stock-sentiment-pipeline/
 │
+├── .github/workflows/ci.yml     # Automated CI testing matrix (Python 3.10, 3.11, 3.12)
 ├── .streamlit/
-│   ├── config.toml              # UI styling, anti-dimming CSS, server parameters
-│   └── secrets.toml.example     # Template for configuring cloud MongoDB credentials
+│   ├── config.toml              # Hardened UI styling & security configurations
+│   └── secrets.toml.example     # Template for MongoDB credentials
 │
-├── docker-compose.yml           # Multi-container orchestration for Kafka (KRaft) & MongoDB
-├── requirements.txt             # Lean dependencies for Streamlit Community Cloud
-├── requirements-pipeline.txt    # Full pipeline dependencies (PyTorch, Transformers, Kafka)
+├── src/                         # Modular package architecture
+│   ├── config.py                # Type-safe TOML & env-var configuration engine
+│   ├── db/
+│   │   └── mongo.py             # Idempotent bulk upsert repository & audit logging
+│   ├── ingestion/
+│   │   └── news_fetcher.py      # Finnhub API & RSS live market ingestion
+│   └── ml/
+│       └── finbert_service.py   # Vectorized FinBERT inference & hardware acceleration
 │
-├── app.py                       # Reactive Streamlit dashboard with autonomous cloud engine
-├── producer.py                  # High-throughput CLI producer streaming to Kafka
-├── consumer.py                  # CLI Kafka consumer with local FinBERT inference & dual-write
-├── run_pipeline.py              # Unified process supervisor managing producer & consumer
-├── sync_to_atlas.py             # Data synchronization utility (Local MongoDB → Atlas)
-├── backfill_logs.py             # Audit log initialization & backfill utility
+├── tests/                       # Unit & integration test suite
+│   ├── test_db_repository.py    # Compound indexing & idempotent write tests
+│   ├── test_kafka_pipeline.py   # Asynchronous Kafka delivery & offset commit tests
+│   ├── test_news_fetcher.py     # Live news extraction & deduplication tests
+│   └── test_sentiment_model.py  # Model latency, calibration & benchmark tests
 │
-├── start_pipeline.bat           # 1-Click Windows execution script
-├── start_pipeline.ps1           # Windows PowerShell automated launcher
-├── test_dashboard.py            # Comprehensive unit test suite (14 test cases)
+├── docker-compose.yml           # Authenticated MongoDB & multi-partition Kafka
+├── Dockerfile                   # Multi-stage hardened production container
+├── pyproject.toml               # Modern PEP 621 package metadata & ruff config
+├── requirements.txt             # Lean production web dashboard dependencies
+├── requirements-pipeline.txt    # Streaming & deep learning inference requirements
+│
+├── app.py                       # Pure CQRS read-only Streamlit dashboard
+├── producer.py                  # Asynchronous Kafka producer with ticker partition keys
+├── consumer.py                  # Consumer with manual offset commits after persistence
+├── run_pipeline.py              # Unified process supervisor managing workers
+├── test_dashboard.py            # Dashboard rendering & theme persistence unit tests
 ├── LICENSE                      # MIT Open-Source License
-└── README.md                    # Project documentation & architectural manual
+└── README.md                    # Architecture guide and documentation
 ```
 
 ---
@@ -246,6 +253,10 @@ All credentials and environmental configurations are managed via Streamlit secre
 The project includes an automated test suite verifying database connection handlers, FinBERT classification fallbacks, stream heartbeats, and UI components:
 
 ```bash
+# Run modular pipeline test suite (19 unit/integration tests)
+python -m unittest discover tests -v
+
+# Run reactive dashboard test suite (14 unit tests)
 python -m unittest test_dashboard.py -v
 ```
 
