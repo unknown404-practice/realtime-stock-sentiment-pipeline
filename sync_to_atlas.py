@@ -6,8 +6,8 @@ Migrates news_sentiment records and pipeline_logs from local Docker MongoDB
 to MongoDB Atlas cloud cluster using standard configuration and idempotent bulk writes.
 """
 
-import os
 import sys
+
 from pymongo import MongoClient, ReplaceOne
 
 # Ensure robust UTF-8 printing on Windows console

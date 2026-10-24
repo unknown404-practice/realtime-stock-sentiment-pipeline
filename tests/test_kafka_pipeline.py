@@ -4,12 +4,11 @@ Tests asynchronous non-blocking publishing, partition keying, message serializat
 batched consumer enrichment, and idempotent persistence.
 """
 
-import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from consumer import enrich_items, process_batch
-from producer import create_producer, publish_stream
+from producer import publish_stream
 from src.ingestion.news_fetcher import NewsFetcher
 
 

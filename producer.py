@@ -9,8 +9,6 @@ Kafka cluster with partition keying, asynchronous micro-batching, and robust shu
 import argparse
 import json
 import logging
-import os
-import random
 import signal
 import socket
 import sys
@@ -35,19 +33,19 @@ logger = logging.getLogger("producer")
 try:
     from kafka import KafkaAdminClient, KafkaProducer
     from kafka.admin import NewTopic
-    from kafka.errors import KafkaError, TopicAlreadyExistsError
+    from kafka.errors import TopicAlreadyExistsError
 except ImportError:
     try:
         from kafka_python_ng import KafkaAdminClient, KafkaProducer
         from kafka_python_ng.admin import NewTopic
-        from kafka_python_ng.errors import KafkaError, TopicAlreadyExistsError
+        from kafka_python_ng.errors import TopicAlreadyExistsError
     except ImportError:
         KafkaProducer = None
         KafkaAdminClient = None
         NewTopic = None
 
 from src.config import get_settings
-from src.ingestion.news_fetcher import NewsFetcher, SUPPORTED_TICKERS, REALISTIC_FINANCIAL_NEWS
+from src.ingestion.news_fetcher import SUPPORTED_TICKERS, NewsFetcher
 
 # Backwards compatibility constants for existing test suites
 DEFAULT_BOOTSTRAP_SERVERS = "localhost:9092"

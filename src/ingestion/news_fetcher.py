@@ -4,12 +4,11 @@ Connects to real financial feeds (Finnhub API, Yahoo Finance RSS, Google News RS
 extracts stock tickers and rich article metadata, and provides deterministic deduplication.
 """
 
-import hashlib
 import logging
 import random
 import re
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 import requests
 

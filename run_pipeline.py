@@ -6,12 +6,12 @@ Launches both the Kafka producer (producer.py) and FinBERT consumer (consumer.py
 as concurrent child processes with synchronized signal handling and graceful shutdown.
 """
 
+import argparse
 import os
+import signal
+import subprocess
 import sys
 import time
-import signal
-import argparse
-import subprocess
 
 # Ensure robust UTF-8 printing on Windows console
 if sys.platform == "win32":
@@ -184,7 +184,7 @@ def main():
             if args.logs_collection:
                 consumer_cmd.extend(["--logs-collection", args.logs_collection])
 
-            print(f"[Pipeline Runner] Spawning FinBERT Consumer process...", flush=True)
+            print("[Pipeline Runner] Spawning FinBERT Consumer process...", flush=True)
             consumer_proc = subprocess.Popen(consumer_cmd, cwd=base_dir)
 
             # Give the consumer a brief moment to initialize model and subscribe
@@ -201,7 +201,7 @@ def main():
                 "--interval", str(args.interval),
                 "--max-messages", str(args.max_messages)
             ]
-            print(f"[Pipeline Runner] Spawning Stock News Producer process...", flush=True)
+            print("[Pipeline Runner] Spawning Stock News Producer process...", flush=True)
             producer_proc = subprocess.Popen(producer_cmd, cwd=base_dir)
 
         print("[Pipeline Runner] All requested streaming workers are running.", flush=True)
@@ -221,7 +221,7 @@ def main():
                     exit_error = True
                     break
                 elif args.max_messages == 0 and not shutting_down:
-                    print(f"\n[Pipeline Runner] Producer stopped.", flush=True)
+                    print("\n[Pipeline Runner] Producer stopped.", flush=True)
                     shutting_down = True
                     break
                 elif args.max_messages > 0 and producer_done_time is None:
@@ -237,7 +237,7 @@ def main():
                     exit_error = True
                     break
                 elif args.max_messages == 0 and not shutting_down:
-                    print(f"\n[Pipeline Runner] Consumer stopped.", flush=True)
+                    print("\n[Pipeline Runner] Consumer stopped.", flush=True)
                     shutting_down = True
                     break
 

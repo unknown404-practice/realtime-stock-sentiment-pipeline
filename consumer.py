@@ -14,7 +14,6 @@ import os
 import signal
 import socket
 import sys
-import time
 import warnings
 from datetime import datetime, timezone
 from typing import Optional, Tuple
@@ -37,11 +36,9 @@ logger = logging.getLogger("consumer")
 # Flexible Kafka imports supporting kafka-python-ng and kafka-python
 try:
     from kafka import KafkaConsumer
-    from kafka.errors import KafkaError
 except ImportError:
     try:
         from kafka_python_ng import KafkaConsumer
-        from kafka_python_ng.errors import KafkaError
     except ImportError:
         KafkaConsumer = None
 
@@ -49,11 +46,11 @@ from pymongo import MongoClient
 
 from src.config import get_settings
 from src.db.mongo import (
+    MongoRepository,
     ensure_indexes,
     get_mongo_client,
     insert_pipeline_log,
     upsert_sentiment_batch,
-    MongoRepository,
 )
 from src.ml.finbert_service import FinBERTService
 
@@ -314,7 +311,7 @@ def main():
                 message=f"Processed and persisted micro-batch of {len(enriched_records)} headlines",
                 extra={
                     "batch_size": len(enriched_records),
-                    "model": predictions[0]["model_name"] if predictions else "FinBERT"
+                    "model": enriched_records[0].get("model_name", "FinBERT") if enriched_records else "FinBERT"
                 }
             )
 

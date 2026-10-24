@@ -6,11 +6,12 @@ into `StockDB.pipeline_logs` for lifetime durability and instant historical visi
 Supports both Local Docker MongoDB (primary high-speed) and MongoDB Atlas.
 """
 
-import os
 from datetime import datetime, timezone
-from pymongo import MongoClient, DESCENDING, ASCENDING
+
+from pymongo import ASCENDING, DESCENDING, MongoClient
 
 from src.config import get_settings
+
 
 def get_mongo_client():
     settings = get_settings()
@@ -44,7 +45,7 @@ def backfill_pipeline_logs(client=None, db_name="StockDB", force_target_uri=None
 
     print(f"[Backfill] Target MongoDB: {label}")
     db = c[db_name]
-    
+
     sentiment_col = db["news_sentiment"]
     logs_col = db["pipeline_logs"]
 
@@ -76,9 +77,9 @@ def backfill_pipeline_logs(client=None, db_name="StockDB", force_target_uri=None
 
     existing_iso_times = set()
     if total_logs > 0:
-        for l in logs_col.find({}, {"iso_time": 1}):
-            if "iso_time" in l:
-                existing_iso_times.add(l["iso_time"])
+        for doc in logs_col.find({}, {"iso_time": 1}):
+            if "iso_time" in doc:
+                existing_iso_times.add(doc["iso_time"])
 
     for doc in cursor:
         iso_time = doc.get("timestamp") or datetime.now(timezone.utc).isoformat()

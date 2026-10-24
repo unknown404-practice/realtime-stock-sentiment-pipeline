@@ -5,6 +5,7 @@ Decoupled presentation layer with zero data mutation side-effects.
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 import pandas as pd
 import streamlit as st
 

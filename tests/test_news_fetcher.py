@@ -5,7 +5,8 @@ Tests ticker symbol extraction, schema validation, and deduplication hashing.
 
 import unittest
 from datetime import datetime
-from src.ingestion.news_fetcher import NewsFetcher, extract_ticker_from_text, SUPPORTED_TICKERS
+
+from src.ingestion.news_fetcher import SUPPORTED_TICKERS, NewsFetcher, extract_ticker_from_text
 
 
 class TestNewsFetcher(unittest.TestCase):

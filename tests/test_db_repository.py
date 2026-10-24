@@ -4,16 +4,14 @@ Tests deterministic ID generation, micro-batch upsert, pure queries, and truthfu
 """
 
 import unittest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 from src.db.mongo import (
+    check_stream_heartbeat,
+    fetch_sentiment_records,
     generate_record_id,
     upsert_sentiment_batch,
-    fetch_sentiment_records,
-    fetch_pipeline_logs,
-    check_stream_heartbeat,
-    insert_pipeline_log,
 )
 
 

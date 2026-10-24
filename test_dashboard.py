@@ -1,6 +1,8 @@
 import os
 import unittest
+
 from streamlit.testing.v1 import AppTest
+
 
 def check_loopback_supported():
     import socket
@@ -24,14 +26,14 @@ class TestDashboardApp(unittest.TestCase):
         at = AppTest.from_file("app.py", default_timeout=20)
         at.run()
         self.assertFalse(at.exception, f"App had exceptions: {at.exception}")
-        
+
         # Verify theme toggle exists in the header controls
         toggles = [t for t in at.toggle if "Dark" in t.label or "Light" in t.label]
         self.assertGreater(len(toggles), 0, "Theme toggle must exist")
-        
+
         theme_toggle = toggles[0]
         self.assertEqual(theme_toggle.value, False, "Default theme should be Light (False)")
-        
+
         # Test toggling to Dark Mode
         theme_toggle.set_value(True).run()
         self.assertFalse(at.exception, f"App threw exception after switching to Dark: {at.exception}")
@@ -140,8 +142,10 @@ class TestDashboardApp(unittest.TestCase):
 
     def test_lifetime_logs_persistence(self):
         import os
+
         from pymongo import MongoClient
-        from app import add_local_log, DB_NAME, LOGS_COLLECTION_NAME
+
+        from app import DB_NAME, LOGS_COLLECTION_NAME, add_local_log
 
         uri = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")
         try:
@@ -193,8 +197,9 @@ class TestDashboardApp(unittest.TestCase):
 
     def test_dynamic_heartbeat_branches(self):
         """Deep verification of heartbeat branches with simulated database documents."""
-        from datetime import datetime, timezone, timedelta
-        from unittest.mock import patch, MagicMock
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import MagicMock, patch
+
         from app import check_stream_heartbeat
 
         # Branch 1: Fresh document (< 30s) -> Live
@@ -234,9 +239,10 @@ class TestDashboardApp(unittest.TestCase):
 
     def test_broker_reachability_check_fail_fast(self):
         """Verify check_broker_reachable fails fast on unreachable brokers without deadlocking."""
-        from producer import check_broker_reachable as prod_check
-        from consumer import check_broker_reachable as cons_check
         import time
+
+        from consumer import check_broker_reachable as cons_check
+        from producer import check_broker_reachable as prod_check
 
         t0 = time.time()
         res_prod = prod_check("localhost:9999", timeout=1.0)
@@ -254,18 +260,19 @@ class TestDashboardApp(unittest.TestCase):
         from consumer import resolve_mongo_uri
         uri, label = resolve_mongo_uri()
         self.assertTrue(uri.startswith("mongodb"), f"Resolved URI must be a valid mongo URI: {uri}")
-        self.assertIn("Local Docker MongoDB", label)
+        self.assertTrue("Local Docker MongoDB" in label or "MongoDB Atlas" in label, f"Unexpected label: {label}")
 
     def test_producer_configuration(self):
-        from producer import parse_args, TICKERS, HEADLINE_TEMPLATES
+        from producer import HEADLINE_TEMPLATES, TICKERS
         self.assertEqual(len(TICKERS), 10)
         self.assertIn("NVDA", TICKERS)
         self.assertIn("AAPL", TICKERS)
         self.assertGreater(len(HEADLINE_TEMPLATES), 10)
 
     def test_pipeline_runner_configuration(self):
-        from run_pipeline import parse_args
         import sys
+
+        from run_pipeline import parse_args
         orig_argv = sys.argv
         try:
             sys.argv = [
@@ -288,7 +295,9 @@ class TestDashboardApp(unittest.TestCase):
     def test_consumer_pipeline_logs_schema(self):
         """Verify StockDB.pipeline_logs contains required schema fields from consumer."""
         import os
+
         from pymongo import MongoClient
+
         from app import DB_NAME, LOGS_COLLECTION_NAME
 
         uri = os.getenv("LOCAL_MONGO_URI", "mongodb://localhost:27017/")

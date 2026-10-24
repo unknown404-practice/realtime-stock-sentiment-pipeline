@@ -29,9 +29,14 @@ def load_streamlit_secrets() -> dict:
 
     try:
         if tomllib is not None:
+            # Standard tomllib in Python 3.11+ requires binary mode
             if hasattr(tomllib, "load"):
-                with open(secrets_path, "rb") as f:
-                    return tomllib.load(f)
+                try:
+                    with open(secrets_path, "rb") as f:
+                        return tomllib.load(f)
+                except (TypeError, ValueError):
+                    with open(secrets_path, "r", encoding="utf-8") as f:
+                        return tomllib.load(f)
             elif hasattr(tomllib, "loads"):
                 with open(secrets_path, "r", encoding="utf-8") as f:
                     return tomllib.loads(f.read())

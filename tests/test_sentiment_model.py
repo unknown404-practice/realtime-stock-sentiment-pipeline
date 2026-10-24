@@ -4,6 +4,7 @@ Evaluates financial sentiment inference accuracy on Financial PhraseBank benchma
 """
 
 import unittest
+
 from src.ml.finbert_service import FinBERTService
 
 BENCHMARK_FINANCIAL_STATEMENTS = [

@@ -6,11 +6,11 @@ pure read-only queries, and truthful stream heartbeat monitoring.
 
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 
-from pymongo import MongoClient, DESCENDING, ASCENDING, UpdateOne
-from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
+from pymongo import ASCENDING, DESCENDING, MongoClient, UpdateOne
 
 from src.config import get_settings
 

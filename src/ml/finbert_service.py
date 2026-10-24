@@ -7,7 +7,7 @@ calibrated softmax confidence scores, and structured inference telemetry.
 import logging
 import math
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class FinBERTService:
     def _initialize_pipeline(self):
         """Instantiate HuggingFace text-classification pipeline."""
         try:
-            from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
             try:
                 tokenizer = AutoTokenizer.from_pretrained(self.model_name, local_files_only=True)
                 model = AutoModelForSequenceClassification.from_pretrained(self.model_name, local_files_only=True)
