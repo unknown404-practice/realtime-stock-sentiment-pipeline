@@ -38,7 +38,7 @@ jobs:
 
       - name: Run Persistent Ingestion Loop (60s window)
         env:
-          MONGO_URI: ${{ secrets.MONGO_URI != '' && secrets.MONGO_URI || 'mongodb+srv://ranadeep2021saha_db_user:RanadeepAirbnb2026@cluster0.tq1iqxk.mongodb.net/?appName=Cluster0' }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
           STREAM_DURATION_SECONDS: "60"
           STREAM_INTERVAL_SECONDS: "2.5"
           OFFLINE_FINBERT: "1"

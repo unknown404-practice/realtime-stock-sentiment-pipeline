@@ -40,11 +40,6 @@ def _handle_signal(signum, frame):
     _running = False
 
 
-DEFAULT_ATLAS_URI = (
-    "mongodb+srv://ranadeep2021saha_db_user:RanadeepAirbnb2026@cluster0.tq1iqxk.mongodb.net/?appName=Cluster0"
-)
-
-
 def run_scheduler(
     duration_seconds: float = 60.0,
     interval: float = 2.5,
@@ -57,7 +52,11 @@ def run_scheduler(
         signal.signal(signal.SIGTERM, _handle_signal)
 
     settings = get_settings()
-    custom_uri = mongo_uri or os.getenv("MONGO_URI") or settings.mongo_uri or DEFAULT_ATLAS_URI
+    custom_uri = mongo_uri or os.getenv("MONGO_URI") or settings.mongo_uri
+
+    if not custom_uri:
+        logger.warning("No MONGO_URI provided in environment or settings. Skipping scheduled execution.")
+        return
 
     logger.info("Connecting to MongoDB Atlas...")
     client, label = get_mongo_client(custom_uri=custom_uri, timeout_ms=5000)
