@@ -65,9 +65,9 @@ def get_mongo_client(custom_uri: Optional[str] = None, timeout_ms: int = 800) ->
         try:
             atlas_client = MongoClient(
                 settings.mongo_uri,
-                serverSelectionTimeoutMS=max(timeout_ms, 1500),
-                connectTimeoutMS=max(timeout_ms, 1500),
-                socketTimeoutMS=max(timeout_ms, 1500),
+                serverSelectionTimeoutMS=max(timeout_ms, 2500),
+                connectTimeoutMS=max(timeout_ms, 2500),
+                socketTimeoutMS=max(timeout_ms, 10000),
                 tls=True,
                 maxPoolSize=25
             )
@@ -77,7 +77,8 @@ def get_mongo_client(custom_uri: Optional[str] = None, timeout_ms: int = 800) ->
             try:
                 atlas_client = MongoClient(
                     settings.mongo_uri,
-                    serverSelectionTimeoutMS=max(timeout_ms, 1500)
+                    serverSelectionTimeoutMS=max(timeout_ms, 2500),
+                    socketTimeoutMS=max(timeout_ms, 10000)
                 )
                 atlas_client.admin.command("ping")
                 return atlas_client, "MongoDB Atlas (Global Cloud, Lifetime)"
@@ -94,10 +95,11 @@ def ensure_indexes(db) -> None:
     logs_col = db[settings.logs_collection_name]
 
     try:
-        # Compound unique index on ticker and headline to enforce uniqueness
-        news_col.create_index([("ticker", ASCENDING), ("headline", ASCENDING)], unique=True, background=True)
+        # Index on ticker and headline for fast lookup without rejecting repeated headlines
+        news_col.create_index([("ticker", ASCENDING), ("headline", ASCENDING)], background=True)
         # Sorting indexes for dashboard timeline and recent news
         news_col.create_index([("timestamp", DESCENDING)], background=True)
+        news_col.create_index([("ticker", ASCENDING)], background=True)
         # Pipeline logs indexing
         logs_col.create_index([("iso_time", DESCENDING)], background=True)
         logs_col.create_index([("level", ASCENDING)], background=True)
@@ -110,6 +112,44 @@ def ensure_indexes(db) -> None:
             pass
     except Exception as e:
         logger.warning("Index creation notice: %s", e)
+
+
+def enforce_retention_policy(db, max_news: int = 15000, max_logs: int = 25000) -> None:
+    """
+    Enforce rolling retention window to guarantee MongoDB Atlas never exceeds cloud storage quotas.
+    Safely prunes older records when collection size exceeds threshold.
+    """
+    if db is None:
+        return
+    try:
+        settings = get_settings()
+        news_col = db[settings.collection_name]
+        logs_col = db[settings.logs_collection_name]
+
+        # Use estimated_document_count for O(1) performance
+        if news_col.estimated_document_count() > max_news:
+            keep_count = max_news // 2
+            pivots = list(
+                news_col.find({}, {"_id": 1, "timestamp": 1})
+                .sort("timestamp", DESCENDING)
+                .skip(keep_count)
+                .limit(1)
+            )
+            if pivots:
+                news_col.delete_many({"timestamp": {"$lt": pivots[0]["timestamp"]}})
+
+        if logs_col.estimated_document_count() > max_logs:
+            keep_count = max_logs // 2
+            pivots = list(
+                logs_col.find({}, {"_id": 1, "iso_time": 1})
+                .sort("iso_time", DESCENDING)
+                .skip(keep_count)
+                .limit(1)
+            )
+            if pivots:
+                logs_col.delete_many({"iso_time": {"$lt": pivots[0]["iso_time"]}})
+    except Exception as exc:
+        logger.debug("Retention enforcement notice: %s", exc)
 
 
 def insert_dlq_message(db, raw_message: Any, error_message: str, source_topic: str = "stock-news") -> None:
@@ -284,7 +324,13 @@ def check_stream_heartbeat(db=None, max_age_seconds: float = 45.0) -> Tuple[bool
 
         for col_name, time_key in targets:
             try:
-                doc = db[col_name].find_one({}, {time_key: 1}, sort=[(time_key, DESCENDING)])
+                doc = db[col_name].find_one(
+                    {time_key: {"$regex": "^[0-9]"}},
+                    {time_key: 1},
+                    sort=[(time_key, DESCENDING)]
+                )
+                if not doc:
+                    doc = db[col_name].find_one({}, {time_key: 1}, sort=[(time_key, DESCENDING)])
                 if doc and time_key in doc:
                     dt = dt_parser.parse(str(doc[time_key]))
                     if dt.tzinfo is None:

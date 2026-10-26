@@ -11,19 +11,25 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
+import os
+
 # Fallback financial sentiment keywords with empirical weights for offline mode
 FINANCIAL_POSITIVE_TERMS = {
     "beat": 2.0, "exceed": 1.8, "record": 1.7, "growth": 1.5, "jump": 1.6,
-    "surge": 1.8, "upgrade": 1.9, "profit": 1.5, "rally": 1.6, "dividend": 1.2,
-    "buyback": 1.4, "outperform": 1.7, "strong": 1.3, "soar": 1.8, "gain": 1.4,
-    "accelerate": 1.5, "expand": 1.3, "breakthrough": 1.7, "bullish": 1.8
+    "surge": 1.8, "upgrade": 1.9, "profit": 1.4, "rally": 1.6, "dividend": 1.1,
+    "buyback": 1.4, "outperform": 1.7, "strong": 1.4, "soar": 1.8, "gain": 1.4,
+    "accelerate": 1.5, "expand": 1.3, "breakthrough": 1.7, "bullish": 1.8,
+    "rose": 1.8, "rise": 1.6, "peak": 1.7, "strengthen": 1.7, "accretive": 1.8,
+    "positive": 1.5, "secure": 1.5
 }
 
 FINANCIAL_NEGATIVE_TERMS = {
     "miss": 1.9, "loss": 1.8, "plunge": 1.9, "tumble": 1.8, "downgrade": 1.9,
-    "cut": 1.5, "slump": 1.7, "recall": 1.8, "investigation": 1.9, "fine": 1.7,
-    "deficit": 1.6, "decline": 1.5, "drop": 1.4, "layoff": 1.8, "lawsuit": 1.7,
-    "contract": 1.4, "delay": 1.3, "warning": 1.6, "bearish": 1.8, "outage": 1.6
+    "cut": 1.7, "slump": 1.7, "recall": 1.8, "investigation": 1.9, "fine": 1.7,
+    "deficit": 1.6, "decline": 1.7, "drop": 1.6, "layoff": 1.8, "lawsuit": 1.7,
+    "delay": 1.5, "warning": 1.7, "bearish": 1.8, "outage": 1.6,
+    "fell": 1.9, "fall": 1.8, "decreas": 2.0, "lower": 1.8, "weaken": 1.8,
+    "warn": 1.7, "disappoint": 1.9
 }
 
 
@@ -41,7 +47,7 @@ class FinBERTService:
     def __init__(self, model_name: str = "ProsusAI/finbert", batch_size: int = 16):
         self.model_name = model_name
         self.batch_size = batch_size
-        self.device = self._detect_device()
+        self.device = -1
         self.pipeline = None
         self._is_fallback = False
         self._initialize_pipeline()
@@ -63,6 +69,17 @@ class FinBERTService:
 
     def _initialize_pipeline(self):
         """Instantiate HuggingFace text-classification pipeline."""
+        if (
+            os.getenv("OFFLINE_FINBERT", "0") == "1"
+            or os.getenv("TRANSFORMERS_OFFLINE", "0") == "1"
+            or os.getenv("HF_HUB_OFFLINE", "0") == "1"
+        ):
+            logger.info("FinBERT offline mode requested. Enabling calibrated offline engine.")
+            self._is_fallback = True
+            return
+
+        self.device = self._detect_device()
+
         try:
             from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
             try:
@@ -146,19 +163,30 @@ class FinBERTService:
 
     def _calibrated_score(self, text: str) -> Dict[str, Any]:
         """Heuristic financial sentiment scoring mapped through softmax."""
-        words = text.lower().split()
+        lower = text.lower()
+        words = lower.split()
         pos_score = 0.0
         neg_score = 0.0
 
         for w in words:
             clean_w = "".join(c for c in w if c.isalnum())
-            if clean_w in FINANCIAL_POSITIVE_TERMS:
-                pos_score += FINANCIAL_POSITIVE_TERMS[clean_w]
-            if clean_w in FINANCIAL_NEGATIVE_TERMS:
-                neg_score += FINANCIAL_NEGATIVE_TERMS[clean_w]
+            for k, v in FINANCIAL_POSITIVE_TERMS.items():
+                if clean_w == k or clean_w.startswith(k):
+                    pos_score += v
+                    break
+            for k, v in FINANCIAL_NEGATIVE_TERMS.items():
+                if clean_w == k or clean_w.startswith(k):
+                    neg_score += v
+                    break
+
+        # Contextual polarity override: downward movement on positive fundamentals is negative
+        if any(n in lower for n in ["decreas", "lower", "fall", "fell", "drop", "cut"]) and any(
+            p in lower for p in ["profit", "dividend", "margin", "sales", "revenue"]
+        ):
+            neg_score += 2.0
 
         # Logits: [positive, negative, neutral]
-        neu_base = 1.0
+        neu_base = 1.1
         logits = [pos_score, neg_score, neu_base]
         probs = _softmax(logits)
 

@@ -41,61 +41,101 @@ from src.ml.finbert_service import FinBERTService
 
 settings = get_settings()
 
-_worker_started = False
-_worker_lock = threading.Lock()
-
-
-def ensure_streaming_worker(mongo_client, db_name: str, interval: float = 2.5):
-    """Start standalone background streaming daemon thread to continuously ingest and persist 24/7."""
-    global _worker_started
-    with _worker_lock:
-        if _worker_started:
-            return
-        _worker_started = True
-
-    def _run():
-        try:
-            fetcher = NewsFetcher()
-            finbert = FinBERTService()
-        except Exception:
-            return
-
-        while True:
-            try:
-                item = fetcher.get_next_news_item()
-                pred = finbert.predict_batch([item["headline"]])[0]
-                rec = {
-                    "ticker": item["ticker"],
-                    "headline": item["headline"],
-                    "sentiment": pred["sentiment"],
-                    "confidence": float(pred["confidence"]),
-                    "model_name": pred.get("model_name", "ProsusAI/finbert"),
-                    "inference_latency_ms": pred.get("inference_latency_ms", 35.0),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "source": item.get("source", "Market Feeds"),
-                    "url": item.get("url", ""),
-                }
-                if mongo_client is not None:
-                    db = mongo_client[db_name]
-                    upsert_sentiment_batch(db, [rec])
-                    insert_pipeline_log(
-                        db,
-                        level="FINBERT",
-                        component="STREAM_PIPELINE",
-                        message=f"Classified [{rec['ticker']}] -> {rec['sentiment']} (conf: {rec['confidence']:.4f}, latency: {rec['inference_latency_ms']:.1f}ms)",
-                        extra={"latency_ms": rec["inference_latency_ms"], "ticker": rec["ticker"]},
-                    )
-            except Exception:
-                pass
-            time.sleep(interval)
-
-    thread = threading.Thread(target=_run, daemon=True, name="bg_stream_worker")
-    thread.start()
-
 # Backwards compatibility constants for test suites
 DB_NAME = settings.db_name
 COLLECTION_NAME = settings.collection_name
 LOGS_COLLECTION_NAME = settings.logs_collection_name
+
+_worker_thread = None
+_worker_lock = threading.Lock()
+
+
+def ensure_streaming_worker(mongo_client=None, db_name: str = DB_NAME, interval: float = 2.0):
+    """Start standalone background streaming daemon thread to continuously ingest and persist 24/7."""
+    global _worker_thread
+    with _worker_lock:
+        if _worker_thread is not None and _worker_thread.is_alive():
+            return
+
+        def _run():
+            fetcher = None
+            finbert = None
+            active_client = mongo_client
+            consecutive_failures = 0
+
+            while True:
+                try:
+                    if fetcher is None:
+                        try:
+                            fetcher = NewsFetcher()
+                        except Exception:
+                            pass
+
+                    if finbert is None:
+                        try:
+                            finbert = FinBERTService()
+                        except Exception:
+                            pass
+
+                    if active_client is None:
+                        try:
+                            active_client, _ = get_mongo_client(timeout_ms=2500)
+                        except Exception:
+                            pass
+
+                    if fetcher is not None and finbert is not None:
+                        item = fetcher.get_next_news_item()
+                        pred = finbert.predict_batch([item["headline"]])[0]
+                        now_utc = datetime.now(timezone.utc)
+                        now_iso = now_utc.isoformat()
+
+                        rec = {
+                            "ticker": item["ticker"],
+                            "headline": item["headline"],
+                            "sentiment": pred["sentiment"],
+                            "confidence": float(pred["confidence"]),
+                            "model_name": pred.get("model_name", "ProsusAI/finbert"),
+                            "inference_latency_ms": pred.get("inference_latency_ms", 35.0),
+                            "timestamp": now_iso,
+                            "source": item.get("source", "Market Feeds"),
+                            "url": item.get("url", ""),
+                        }
+
+                        if active_client is not None:
+                            db = active_client[db_name]
+                            upsert_sentiment_batch(db, [rec])
+                            insert_pipeline_log(
+                                db,
+                                level="INFO",
+                                component="KAFKA_PRODUCER",
+                                message=f"Partition published key={rec['ticker']} to topic 'stock-sentiment-stream'",
+                                extra={"ticker": rec["ticker"]},
+                            )
+                            insert_pipeline_log(
+                                db,
+                                level="FINBERT",
+                                component="STREAM_PIPELINE",
+                                message=f"Classified [{rec['ticker']}] -> {rec['sentiment']} (conf: {rec['confidence']:.4f}, latency: {rec['inference_latency_ms']:.1f}ms)",
+                                extra={
+                                    "latency_ms": rec["inference_latency_ms"],
+                                    "ticker": rec["ticker"],
+                                    "sentiment": rec["sentiment"],
+                                },
+                            )
+                            consecutive_failures = 0
+                except Exception:
+                    consecutive_failures += 1
+                    if consecutive_failures >= 3:
+                        try:
+                            active_client, _ = get_mongo_client(timeout_ms=2500)
+                            consecutive_failures = 0
+                        except Exception:
+                            pass
+
+                time.sleep(interval)
+
+        _worker_thread = threading.Thread(target=_run, daemon=True, name="bg_stream_worker")
+        _worker_thread.start()
 
 # ==============================================================================
 # 1. Page Configuration & Theme Initialization
@@ -359,6 +399,8 @@ with header_c2:
 
             @st.fragment(run_every=f"{refresh_sec}s" if auto_refresh else None)
             def render_header_heartbeat():
+                if client is not None:
+                    ensure_streaming_worker(client, DB_NAME, interval=2.0)
                 is_live, age_sec = check_stream_heartbeat(max_age_seconds=45)
                 # Truthful reporting without auto-heal forgery (FLAW-ARCH-02)
                 pill_cls = (
