@@ -40,8 +40,13 @@ def _handle_signal(signum, frame):
     _running = False
 
 
+DEFAULT_ATLAS_URI = (
+    "mongodb+srv://ranadeep2021saha_db_user:RanadeepAirbnb2026@cluster0.tq1iqxk.mongodb.net/?appName=Cluster0"
+)
+
+
 def run_scheduler(
-    duration_seconds: float = 280.0,
+    duration_seconds: float = 60.0,
     interval: float = 2.5,
     max_items: int = 0,
     mongo_uri: str = None,
@@ -52,7 +57,7 @@ def run_scheduler(
         signal.signal(signal.SIGTERM, _handle_signal)
 
     settings = get_settings()
-    custom_uri = mongo_uri or os.getenv("MONGO_URI") or settings.mongo_uri
+    custom_uri = mongo_uri or os.getenv("MONGO_URI") or settings.mongo_uri or DEFAULT_ATLAS_URI
 
     logger.info("Connecting to MongoDB Atlas...")
     client, label = get_mongo_client(custom_uri=custom_uri, timeout_ms=5000)
@@ -65,7 +70,7 @@ def run_scheduler(
     logger.info("Connected successfully to %s (database: %s)", label, db_name)
 
     # Enforce rolling storage retention to keep Atlas permanently compact under 15MB
-    enforce_retention_policy(db)
+    enforce_retention_policy(db, max_news=8000, max_logs=15000)
 
     logger.info("Initializing NewsFetcher and FinBERTService...")
     fetcher = NewsFetcher()
@@ -92,7 +97,11 @@ def run_scheduler(
 
         try:
             item = fetcher.get_next_news_item()
-            pred = finbert.predict_batch([item["headline"]])[0]
+            preds = finbert.predict_batch([item["headline"]])
+            if not preds:
+                time.sleep(interval)
+                continue
+            pred = preds[0]
             now_utc = datetime.now(timezone.utc)
             now_iso = now_utc.isoformat()
 
@@ -133,6 +142,9 @@ def run_scheduler(
             )
 
             items_processed += 1
+            if items_processed % 50 == 0:
+                enforce_retention_policy(db, max_news=8000, max_logs=15000)
+
             logger.info(
                 "[%d] %s | %s | %s (conf: %.4f, %.1fms)",
                 items_processed,
@@ -148,6 +160,7 @@ def run_scheduler(
 
         time.sleep(interval)
 
+    enforce_retention_policy(db, max_news=8000, max_logs=15000)
     logger.info("Scheduler completed. Total items ingested and persisted: %d", items_processed)
 
 
@@ -156,8 +169,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--duration-seconds",
         type=float,
-        default=float(os.getenv("STREAM_DURATION_SECONDS", "280")),
-        help="How long to run the worker in seconds (default: 280s)",
+        default=float(os.getenv("STREAM_DURATION_SECONDS", "60")),
+        help="How long to run the worker in seconds (default: 60s)",
     )
     parser.add_argument(
         "--interval",

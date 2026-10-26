@@ -2,8 +2,8 @@ name: 24/7 Live Stream Ingestion Scheduler
 
 on:
   schedule:
-    # Run every 5 minutes 24/7 to continuously persist fresh news sentiment & telemetry to MongoDB Atlas
-    - cron: "*/5 * * * *"
+    # Run every 10 minutes 24/7 to continuously persist fresh news sentiment & telemetry to MongoDB Atlas
+    - cron: "*/10 * * * *"
   workflow_dispatch:
   push:
     branches: [ main ]
@@ -19,7 +19,7 @@ jobs:
   ingest_stream:
     name: Continuous 24/7 Stream Ingest
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - name: Checkout code
@@ -36,11 +36,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run Persistent Ingestion Loop (280s window)
+      - name: Run Persistent Ingestion Loop (60s window)
         env:
-          MONGO_URI: ${{ secrets.MONGO_URI }}
-          STREAM_DURATION_SECONDS: "280"
+          MONGO_URI: ${{ secrets.MONGO_URI != '' && secrets.MONGO_URI || 'mongodb+srv://ranadeep2021saha_db_user:RanadeepAirbnb2026@cluster0.tq1iqxk.mongodb.net/?appName=Cluster0' }}
+          STREAM_DURATION_SECONDS: "60"
           STREAM_INTERVAL_SECONDS: "2.5"
           OFFLINE_FINBERT: "1"
         run: |
-          python scripts/scheduled_stream_worker.py --duration-seconds 280 --interval 2.5
+          python scripts/scheduled_stream_worker.py --duration-seconds 60 --interval 2.5

@@ -15,9 +15,15 @@ from src.config import get_settings
 from pymongo import MongoClient, DESCENDING
 from src.db.mongo import ensure_indexes
 
+DEFAULT_ATLAS_URI = (
+    "mongodb+srv://ranadeep2021saha_db_user:RanadeepAirbnb2026@cluster0.tq1iqxk.mongodb.net/?appName=Cluster0"
+)
+
 def compact_and_prune(keep_news: int = 5000, keep_logs: int = 5000):
     settings = get_settings()
-    client = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=5000, socketTimeoutMS=30000)
+    import os
+    uri = settings.mongo_uri or os.getenv("MONGO_URI") or DEFAULT_ATLAS_URI
+    client = MongoClient(uri, serverSelectionTimeoutMS=5000, socketTimeoutMS=30000)
     db = client[settings.db_name]
     print(f"Connected to Atlas {settings.db_name}")
 

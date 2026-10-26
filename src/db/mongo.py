@@ -114,7 +114,7 @@ def ensure_indexes(db) -> None:
         logger.warning("Index creation notice: %s", e)
 
 
-def enforce_retention_policy(db, max_news: int = 15000, max_logs: int = 25000) -> None:
+def enforce_retention_policy(db, max_news: int = 8000, max_logs: int = 15000) -> None:
     """
     Enforce rolling retention window to guarantee MongoDB Atlas never exceeds cloud storage quotas.
     Safely prunes older records when collection size exceeds threshold.

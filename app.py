@@ -21,6 +21,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+import logging
 import threading
 import time
 
@@ -39,6 +40,7 @@ from src.db.mongo import (
 from src.ingestion.news_fetcher import NewsFetcher
 from src.ml.finbert_service import FinBERTService
 
+logger = logging.getLogger("dashboard")
 settings = get_settings()
 
 # Backwards compatibility constants for test suites
@@ -48,11 +50,78 @@ LOGS_COLLECTION_NAME = settings.logs_collection_name
 
 _worker_thread = None
 _worker_lock = threading.Lock()
+_shared_client = None
+
+
+def rehydrate_stream_if_stale(
+    mongo_client=None, db_name: str = DB_NAME, max_stale_seconds: float = 45.0
+) -> bool:
+    """
+    On-demand catch-up / re-hydration mechanism.
+    If the database stream is detected to be idle or stale (e.g. after container sleep or dormancy),
+    synchronously ingests an initial batch of live market news and pipeline telemetry so that
+    the dashboard immediately opens with 'STREAM: LIVE FAST' and fresh chronological data.
+    """
+    active_client = mongo_client or _shared_client
+    if active_client is None:
+        return False
+    try:
+        db = active_client[db_name]
+        is_live, age_sec = db_check_stream_heartbeat(db, max_age_seconds=max_stale_seconds)
+        if not is_live:
+            fetcher = NewsFetcher()
+            finbert = FinBERTService()
+            item = fetcher.get_next_news_item()
+            preds = finbert.predict_batch([item["headline"]])
+            if not preds:
+                return False
+            pred = preds[0]
+            now_utc = datetime.now(timezone.utc)
+            now_iso = now_utc.isoformat()
+
+            rec = {
+                "ticker": item["ticker"],
+                "headline": item["headline"],
+                "sentiment": pred["sentiment"],
+                "confidence": float(pred["confidence"]),
+                "model_name": pred.get("model_name", "ProsusAI/finbert"),
+                "inference_latency_ms": pred.get("inference_latency_ms", 35.0),
+                "timestamp": now_iso,
+                "source": item.get("source", "Market Feeds"),
+                "url": item.get("url", ""),
+            }
+
+            upsert_sentiment_batch(db, [rec])
+            insert_pipeline_log(
+                db,
+                level="INFO",
+                component="KAFKA_PRODUCER",
+                message=f"Partition published key={rec['ticker']} to topic 'stock-sentiment-stream'",
+                extra={"ticker": rec["ticker"]},
+            )
+            insert_pipeline_log(
+                db,
+                level="FINBERT",
+                component="STREAM_PIPELINE",
+                message=f"Classified [{rec['ticker']}] -> {rec['sentiment']} (conf: {rec['confidence']:.4f}, latency: {rec['inference_latency_ms']:.1f}ms)",
+                extra={
+                    "latency_ms": rec["inference_latency_ms"],
+                    "ticker": rec["ticker"],
+                    "sentiment": rec["sentiment"],
+                },
+            )
+            return True
+    except Exception as exc:
+        logger.debug("Rehydration notice: %s", exc)
+    return False
 
 
 def ensure_streaming_worker(mongo_client=None, db_name: str = DB_NAME, interval: float = 2.0):
     """Start standalone background streaming daemon thread to continuously ingest and persist 24/7."""
-    global _worker_thread
+    global _worker_thread, _shared_client
+    if mongo_client is not None:
+        _shared_client = mongo_client
+
     with _worker_lock:
         if _worker_thread is not None and _worker_thread.is_alive():
             return
@@ -60,11 +129,14 @@ def ensure_streaming_worker(mongo_client=None, db_name: str = DB_NAME, interval:
         def _run():
             fetcher = None
             finbert = None
-            active_client = mongo_client
+            active_client = _shared_client or mongo_client
             consecutive_failures = 0
 
             while True:
                 try:
+                    if _shared_client is not None:
+                        active_client = _shared_client
+
                     if fetcher is None:
                         try:
                             fetcher = NewsFetcher()
@@ -85,44 +157,46 @@ def ensure_streaming_worker(mongo_client=None, db_name: str = DB_NAME, interval:
 
                     if fetcher is not None and finbert is not None:
                         item = fetcher.get_next_news_item()
-                        pred = finbert.predict_batch([item["headline"]])[0]
-                        now_utc = datetime.now(timezone.utc)
-                        now_iso = now_utc.isoformat()
+                        preds = finbert.predict_batch([item["headline"]])
+                        if preds:
+                            pred = preds[0]
+                            now_utc = datetime.now(timezone.utc)
+                            now_iso = now_utc.isoformat()
 
-                        rec = {
-                            "ticker": item["ticker"],
-                            "headline": item["headline"],
-                            "sentiment": pred["sentiment"],
-                            "confidence": float(pred["confidence"]),
-                            "model_name": pred.get("model_name", "ProsusAI/finbert"),
-                            "inference_latency_ms": pred.get("inference_latency_ms", 35.0),
-                            "timestamp": now_iso,
-                            "source": item.get("source", "Market Feeds"),
-                            "url": item.get("url", ""),
-                        }
+                            rec = {
+                                "ticker": item["ticker"],
+                                "headline": item["headline"],
+                                "sentiment": pred["sentiment"],
+                                "confidence": float(pred["confidence"]),
+                                "model_name": pred.get("model_name", "ProsusAI/finbert"),
+                                "inference_latency_ms": pred.get("inference_latency_ms", 35.0),
+                                "timestamp": now_iso,
+                                "source": item.get("source", "Market Feeds"),
+                                "url": item.get("url", ""),
+                            }
 
-                        if active_client is not None:
-                            db = active_client[db_name]
-                            upsert_sentiment_batch(db, [rec])
-                            insert_pipeline_log(
-                                db,
-                                level="INFO",
-                                component="KAFKA_PRODUCER",
-                                message=f"Partition published key={rec['ticker']} to topic 'stock-sentiment-stream'",
-                                extra={"ticker": rec["ticker"]},
-                            )
-                            insert_pipeline_log(
-                                db,
-                                level="FINBERT",
-                                component="STREAM_PIPELINE",
-                                message=f"Classified [{rec['ticker']}] -> {rec['sentiment']} (conf: {rec['confidence']:.4f}, latency: {rec['inference_latency_ms']:.1f}ms)",
-                                extra={
-                                    "latency_ms": rec["inference_latency_ms"],
-                                    "ticker": rec["ticker"],
-                                    "sentiment": rec["sentiment"],
-                                },
-                            )
-                            consecutive_failures = 0
+                            if active_client is not None:
+                                db = active_client[db_name]
+                                upsert_sentiment_batch(db, [rec])
+                                insert_pipeline_log(
+                                    db,
+                                    level="INFO",
+                                    component="KAFKA_PRODUCER",
+                                    message=f"Partition published key={rec['ticker']} to topic 'stock-sentiment-stream'",
+                                    extra={"ticker": rec["ticker"]},
+                                )
+                                insert_pipeline_log(
+                                    db,
+                                    level="FINBERT",
+                                    component="STREAM_PIPELINE",
+                                    message=f"Classified [{rec['ticker']}] -> {rec['sentiment']} (conf: {rec['confidence']:.4f}, latency: {rec['inference_latency_ms']:.1f}ms)",
+                                    extra={
+                                        "latency_ms": rec["inference_latency_ms"],
+                                        "ticker": rec["ticker"],
+                                        "sentiment": rec["sentiment"],
+                                    },
+                                )
+                                consecutive_failures = 0
                 except Exception:
                     consecutive_failures += 1
                     if consecutive_failures >= 3:
@@ -168,9 +242,10 @@ if "_mongo_checked" not in st.session_state:
 client = st.session_state.get("mongo_client")
 DB_SOURCE_LABEL = st.session_state.get("db_source_label", "Disconnected")
 
-# Launch continuous 24/7 background streaming worker
+# Launch continuous 24/7 background streaming worker & immediate catch-up if stale
 if client is not None:
-    ensure_streaming_worker(client, DB_NAME, interval=2.5)
+    rehydrate_stream_if_stale(client, DB_NAME, max_stale_seconds=45.0)
+    ensure_streaming_worker(client, DB_NAME, interval=2.0)
 
 
 def check_stream_heartbeat(max_age_seconds: float = 45.0) -> Tuple[bool, Optional[float]]:
@@ -402,6 +477,9 @@ with header_c2:
                 if client is not None:
                     ensure_streaming_worker(client, DB_NAME, interval=2.0)
                 is_live, age_sec = check_stream_heartbeat(max_age_seconds=45)
+                if not is_live and client is not None:
+                    rehydrate_stream_if_stale(client, DB_NAME, max_stale_seconds=45.0)
+                    is_live, age_sec = check_stream_heartbeat(max_age_seconds=45)
                 # Truthful reporting without auto-heal forgery (FLAW-ARCH-02)
                 pill_cls = (
                     "status-pill status-live"
