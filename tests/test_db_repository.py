@@ -171,6 +171,68 @@ class TestDBRepository(unittest.TestCase):
         mock_db.list_collection_names.assert_not_called()
         mock_db.create_collection.assert_not_called()
 
+    def test_enforce_retention_policy_bypasses_delete_on_capped(self):
+        from src.db.mongo import enforce_retention_policy
+
+        mock_db = MagicMock()
+        mock_db.command.return_value = {"capped": True}
+        mock_db.__getitem__.return_value.estimated_document_count.return_value = 20000
+
+        enforce_retention_policy(mock_db, max_news=5000, max_logs=5000)
+
+        # On capped collections, delete_many should NOT be called
+        mock_db.__getitem__.return_value.delete_many.assert_not_called()
+
+    def test_enforce_retention_policy_prunes_uncapped(self):
+        from src.db.mongo import enforce_retention_policy
+
+        mock_db = MagicMock()
+        mock_db.command.return_value = {"capped": False}
+        news_mock = MagicMock()
+        news_mock.estimated_document_count.return_value = 20000
+        news_mock.find.return_value.sort.return_value.skip.return_value.limit.return_value = [{"_id": 1, "timestamp": "2026-10-25T00:00:00Z"}]
+        mock_db.__getitem__.return_value = news_mock
+
+        enforce_retention_policy(mock_db, max_news=5000, max_logs=5000)
+
+        # On uncapped collections exceeding max, delete_many should be called
+        self.assertGreater(news_mock.delete_many.call_count, 0)
+
+    def test_compact_and_prune_atomic_swap(self):
+        from unittest.mock import patch
+
+        from scripts.prune_db import compact_and_prune
+
+        mock_client = MagicMock()
+        mock_db = MagicMock()
+        mock_client.__getitem__.return_value = mock_db
+
+        # collStats returns uncapped collection needing compaction
+        mock_db.command.side_effect = lambda cmd, *args, **kwargs: (
+            {"ok": 1} if cmd == "dbStats" else {"capped": False, "max": 0, "count": 100}
+        )
+
+        mock_col = MagicMock()
+        mock_col.estimated_document_count.return_value = 10000
+        mock_col.find.return_value.sort.return_value.limit.return_value = [
+            {"_id": "doc2", "timestamp": "2026-10-28T02:00:00Z"},
+            {"_id": "doc1", "timestamp": "2026-10-28T01:00:00Z"},
+        ]
+        mock_db.__getitem__.return_value = mock_col
+
+        with patch("scripts.prune_db.MongoClient", return_value=mock_client):
+            compact_and_prune(keep_news=10, keep_logs=10, force=True)
+
+        # Temp collections should have been created with capped=True
+        create_calls = mock_db.create_collection.call_args_list
+        self.assertTrue(any(c[1].get("capped") is True for c in create_calls))
+
+        # Rename with dropTarget=True should have been invoked for atomic swap
+        rename_calls = mock_col.rename.call_args_list
+        self.assertTrue(any(c[1].get("dropTarget") is True for c in rename_calls))
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

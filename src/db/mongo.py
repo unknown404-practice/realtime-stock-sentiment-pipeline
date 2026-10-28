@@ -181,6 +181,7 @@ def enforce_retention_policy(db, max_news: int = 8000, max_logs: int = 15000) ->
     """
     Enforce rolling retention window to guarantee MongoDB Atlas never exceeds cloud storage quotas.
     Safely prunes older records when collection size exceeds threshold.
+    For native Capped Collections, retention is automatically enforced at the engine level in FIFO order.
     """
     if db is None:
         return
@@ -189,8 +190,14 @@ def enforce_retention_policy(db, max_news: int = 8000, max_logs: int = 15000) ->
         news_col = db[settings.collection_name]
         logs_col = db[settings.logs_collection_name]
 
-        # Use estimated_document_count for O(1) performance
-        if news_col.estimated_document_count() > max_news:
+        # Check capped status; capped collections automatically age out documents in circular buffers
+        news_is_capped = False
+        try:
+            news_is_capped = bool(db.command("collStats", settings.collection_name).get("capped", False))
+        except Exception:
+            pass
+
+        if not news_is_capped and news_col.estimated_document_count() > max_news:
             keep_count = max_news // 2
             pivots = list(
                 news_col.find({}, {"_id": 1, "timestamp": 1})
@@ -201,7 +208,13 @@ def enforce_retention_policy(db, max_news: int = 8000, max_logs: int = 15000) ->
             if pivots:
                 news_col.delete_many({"timestamp": {"$lt": pivots[0]["timestamp"]}})
 
-        if logs_col.estimated_document_count() > max_logs:
+        logs_is_capped = False
+        try:
+            logs_is_capped = bool(db.command("collStats", settings.logs_collection_name).get("capped", False))
+        except Exception:
+            pass
+
+        if not logs_is_capped and logs_col.estimated_document_count() > max_logs:
             keep_count = max_logs // 2
             pivots = list(
                 logs_col.find({}, {"_id": 1, "iso_time": 1})
