@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.config import get_settings
 from pymongo import MongoClient, DESCENDING
-from src.db.mongo import ensure_indexes
+from src.db.mongo import ensure_bounded_collections, ensure_indexes
 
 def compact_and_prune(keep_news: int = 5000, keep_logs: int = 5000):
     settings = get_settings()
@@ -26,6 +26,8 @@ def compact_and_prune(keep_news: int = 5000, keep_logs: int = 5000):
     db = client[settings.db_name]
     print(f"Connected to Atlas {settings.db_name}")
 
+    print("Initial dbStats:", db.command("dbStats"))
+
     # 1. Compact news_sentiment
     print("Reading newest news records...")
     news_col = db[settings.collection_name]
@@ -35,6 +37,8 @@ def compact_and_prune(keep_news: int = 5000, keep_logs: int = 5000):
     if len(newest_news) > 0 and news_col.estimated_document_count() > keep_news:
         print("Dropping news collection to reclaim storage...")
         news_col.drop()
+        print("Recreating bounded capped news collection...")
+        ensure_bounded_collections(db)
         print("Reinserting preserved news records...")
         db[settings.collection_name].insert_many(newest_news)
         print("Recreating news indexes...")
@@ -48,14 +52,17 @@ def compact_and_prune(keep_news: int = 5000, keep_logs: int = 5000):
     if len(newest_logs) > 0 and logs_col.estimated_document_count() > keep_logs:
         print("Dropping logs collection to reclaim storage...")
         logs_col.drop()
+        print("Recreating bounded capped logs collection...")
+        ensure_bounded_collections(db)
         print("Reinserting preserved logs...")
         db[settings.logs_collection_name].insert_many(newest_logs)
         print("Recreating log indexes...")
 
     ensure_indexes(db)
-    print("Compaction complete! Verifying counts:")
-    print("news_sentiment:", db[settings.collection_name].count_documents({}))
-    print("pipeline_logs:", db[settings.logs_collection_name].count_documents({}))
+    print("Compaction complete! Verifying counts and storage:")
+    print("news_sentiment count:", db[settings.collection_name].count_documents({}))
+    print("pipeline_logs count:", db[settings.logs_collection_name].count_documents({}))
+    print("Final dbStats:", db.command("dbStats"))
 
 if __name__ == "__main__":
     compact_and_prune()

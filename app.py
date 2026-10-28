@@ -31,6 +31,9 @@ from src.db.mongo import (
     check_stream_heartbeat as db_check_stream_heartbeat,
 )
 from src.db.mongo import (
+    enforce_retention_policy,
+    ensure_bounded_collections,
+    ensure_indexes,
     fetch_pipeline_logs,
     fetch_sentiment_records,
     get_mongo_client,
@@ -131,11 +134,20 @@ def ensure_streaming_worker(mongo_client=None, db_name: str = DB_NAME, interval:
             finbert = None
             active_client = _shared_client or mongo_client
             consecutive_failures = 0
+            worker_ticks = 0
+            bounded_ensured = False
 
             while True:
                 try:
                     if _shared_client is not None:
                         active_client = _shared_client
+
+                    if active_client is not None and not bounded_ensured:
+                        try:
+                            ensure_indexes(active_client[db_name])
+                            bounded_ensured = True
+                        except Exception:
+                            pass
 
                     if fetcher is None:
                         try:
@@ -197,11 +209,15 @@ def ensure_streaming_worker(mongo_client=None, db_name: str = DB_NAME, interval:
                                     },
                                 )
                                 consecutive_failures = 0
+                                worker_ticks += 1
+                                if worker_ticks % 50 == 0:
+                                    enforce_retention_policy(db, max_news=8000, max_logs=15000)
                 except Exception:
                     consecutive_failures += 1
                     if consecutive_failures >= 3:
                         try:
                             active_client, _ = get_mongo_client(timeout_ms=2500)
+                            bounded_ensured = False
                             consecutive_failures = 0
                         except Exception:
                             pass
@@ -244,6 +260,11 @@ DB_SOURCE_LABEL = st.session_state.get("db_source_label", "Disconnected")
 
 # Launch continuous 24/7 background streaming worker & immediate catch-up if stale
 if client is not None:
+    try:
+        ensure_bounded_collections(client[DB_NAME])
+        ensure_indexes(client[DB_NAME])
+    except Exception:
+        pass
     rehydrate_stream_if_stale(client, DB_NAME, max_stale_seconds=45.0)
     ensure_streaming_worker(client, DB_NAME, interval=2.0)
 

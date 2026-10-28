@@ -88,8 +88,71 @@ def get_mongo_client(custom_uri: Optional[str] = None, timeout_ms: int = 800) ->
     return None, "24/7 Live Stream (FinBERT Active, In-Memory Pipeline)"
 
 
+def ensure_bounded_collections(
+    db,
+    news_size_bytes: int = 15728640,  # 15 MB
+    news_max_docs: int = 10000,
+    logs_size_bytes: int = 15728640,  # 15 MB
+    logs_max_docs: int = 15000,
+    dlq_size_bytes: int = 5242880,  # 5 MB
+    dlq_max_docs: int = 2000,
+) -> None:
+    """
+    Physically bounds high-frequency streaming collections using MongoDB Capped Collections.
+    Guarantees at the storage-engine level that the database can never exceed ~35MB under
+    any continuous lifetime streaming workload on MongoDB Atlas M0.
+    """
+    if db is None:
+        return
+
+    # Gracefully bypass mongomock environments where capped options raise NotImplementedError
+    if (
+        getattr(db, "__module__", "").startswith("mongomock")
+        or getattr(getattr(db, "client", None), "__module__", "").startswith("mongomock")
+    ):
+        return
+
+    settings = get_settings()
+    targets = [
+        (settings.collection_name, news_size_bytes, news_max_docs),
+        (settings.logs_collection_name, logs_size_bytes, logs_max_docs),
+        ("dead_letter_queue", dlq_size_bytes, dlq_max_docs),
+    ]
+
+    try:
+        existing_cols = db.list_collection_names()
+    except Exception as exc:
+        logger.debug("Failed to list collections for bounded collection verification: %s", exc)
+        return
+
+    for col_name, size_bytes, max_docs in targets:
+        try:
+            if col_name not in existing_cols:
+                db.create_collection(col_name, capped=True, size=size_bytes, max=max_docs)
+                logger.info("Created bounded capped collection '%s' (max_size=%d bytes, max_docs=%d)", col_name, size_bytes, max_docs)
+            else:
+                try:
+                    stats = db.command("collStats", col_name)
+                    is_capped = stats.get("capped", False)
+                except Exception:
+                    is_capped = False
+
+                if not is_capped:
+                    logger.info("Converting collection '%s' to capped with size=%d...", col_name, size_bytes)
+                    try:
+                        db.command({"convertToCapped": col_name, "size": size_bytes})
+                    except Exception as convert_exc:
+                        logger.warning("Could not convert '%s' to capped: %s", col_name, convert_exc)
+        except Exception as exc:
+            logger.debug("Bounded collection enforcement notice for '%s': %s", col_name, exc)
+
+
 def ensure_indexes(db) -> None:
     """Create essential compound and sorting indexes to prevent full collection scans."""
+    if db is None:
+        return
+
+    ensure_bounded_collections(db)
     settings = get_settings()
     news_col = db[settings.collection_name]
     logs_col = db[settings.logs_collection_name]

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from src.db.mongo import (
     check_stream_heartbeat,
+    ensure_bounded_collections,
     fetch_sentiment_records,
     generate_record_id,
     upsert_sentiment_batch,
@@ -107,6 +108,68 @@ class TestDBRepository(unittest.TestCase):
         is_live, age = check_stream_heartbeat(mock_db, max_age_seconds=45)
         self.assertFalse(is_live)
         self.assertIsNone(age)
+
+    def test_ensure_bounded_collections_creates_capped_when_missing(self):
+        mock_db = MagicMock()
+        mock_db.__module__ = "pymongo.database"
+        mock_db.list_collection_names.return_value = []
+
+        ensure_bounded_collections(mock_db)
+
+        # Should create all 3 collections with capped=True
+        self.assertEqual(mock_db.create_collection.call_count, 3)
+        created_calls = mock_db.create_collection.call_args_list
+
+        col_names = [call[0][0] for call in created_calls]
+        self.assertIn("news_sentiment", col_names)
+        self.assertIn("pipeline_logs", col_names)
+        self.assertIn("dead_letter_queue", col_names)
+
+        for call in created_calls:
+            self.assertTrue(call[1].get("capped"), "Collection must be created as capped")
+            self.assertGreater(call[1].get("size"), 0, "Collection must have a physical size bound")
+
+    def test_ensure_bounded_collections_converts_uncapped_collection(self):
+        mock_db = MagicMock()
+        mock_db.__module__ = "pymongo.database"
+        mock_db.list_collection_names.return_value = ["news_sentiment", "pipeline_logs", "dead_letter_queue"]
+        # collStats returns capped=False
+        mock_db.command.return_value = {"capped": False}
+
+        ensure_bounded_collections(mock_db)
+
+        # create_collection should NOT be called since collections already exist
+        mock_db.create_collection.assert_not_called()
+        # convertToCapped should be executed via db.command
+        convert_calls = [
+            c for c in mock_db.command.call_args_list
+            if isinstance(c[0][0], dict) and "convertToCapped" in c[0][0]
+        ]
+        self.assertEqual(len(convert_calls), 3)
+
+    def test_ensure_bounded_collections_noop_when_already_capped(self):
+        mock_db = MagicMock()
+        mock_db.__module__ = "pymongo.database"
+        mock_db.list_collection_names.return_value = ["news_sentiment", "pipeline_logs", "dead_letter_queue"]
+        mock_db.command.return_value = {"capped": True}
+
+        ensure_bounded_collections(mock_db)
+
+        mock_db.create_collection.assert_not_called()
+        convert_calls = [
+            c for c in mock_db.command.call_args_list
+            if isinstance(c[0][0], dict) and "convertToCapped" in c[0][0]
+        ]
+        self.assertEqual(len(convert_calls), 0)
+
+    def test_ensure_bounded_collections_mongomock_bypass(self):
+        mock_db = MagicMock()
+        mock_db.__module__ = "mongomock.database"
+
+        ensure_bounded_collections(mock_db)
+
+        mock_db.list_collection_names.assert_not_called()
+        mock_db.create_collection.assert_not_called()
 
 
 if __name__ == "__main__":

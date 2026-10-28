@@ -20,7 +20,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import get_settings
-from src.db.mongo import enforce_retention_policy, get_mongo_client, insert_pipeline_log, upsert_sentiment_batch
+from src.db.mongo import (
+    enforce_retention_policy,
+    ensure_bounded_collections,
+    ensure_indexes,
+    get_mongo_client,
+    insert_pipeline_log,
+    upsert_sentiment_batch,
+)
 from src.ingestion.news_fetcher import NewsFetcher
 from src.ml.finbert_service import FinBERTService
 
@@ -68,7 +75,9 @@ def run_scheduler(
     db = client[db_name]
     logger.info("Connected successfully to %s (database: %s)", label, db_name)
 
-    # Enforce rolling storage retention to keep Atlas permanently compact under 15MB
+    # Enforce bounded capped collections and rolling storage retention to keep Atlas permanently compact under ~35MB
+    ensure_bounded_collections(db)
+    ensure_indexes(db)
     enforce_retention_policy(db, max_news=8000, max_logs=15000)
 
     logger.info("Initializing NewsFetcher and FinBERTService...")
